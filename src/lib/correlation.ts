@@ -1,4 +1,5 @@
 import type { AnyLog, MealLog, StoolLog, ExerciseLog, BristolType } from "./types";
+import { isHealthyColor, getColorScore } from "./stool-color";
 
 const HOUR = 3600 * 1000;
 const LOOKBACK_MS = 72 * HOUR;
@@ -23,7 +24,8 @@ export function isOptimalStool(s: StoolLog): boolean {
   return (
     categoryOf(s.bristol) === "optimal" &&
     s.urgency !== "high" &&
-    s.ease !== "strained"
+    s.ease !== "strained" &&
+    isHealthyColor(s.color)
   );
 }
 
@@ -33,12 +35,23 @@ export function gutScore(logs: AnyLog[], now = Date.now()): number {
     (l): l is StoolLog => l.type === "stool" && l.timestamp >= since
   );
   if (stools.length === 0) return 0;
+
   const optimal = stools.filter(isOptimalStool).length;
   const ratio = optimal / stools.length;
-  // Frequency bonus: 7 optimal logs in the week multiplies the score by 1.3
-  // (scales linearly from 0 → 1.3 between 0 and 7 optimal logs).
+
+  let colorWeightedRatio = 0;
+  for (const stool of stools) {
+    if (isOptimalStool(stool)) {
+      colorWeightedRatio += getColorScore(stool.color);
+    }
+  }
+  colorWeightedRatio /= stools.length;
+
+  // Blend: 70% bristol/urgency/ease, 30% color weighting
+  const blendedRatio = ratio * 0.7 + colorWeightedRatio * 0.3;
+
   const frequencyBonus = (Math.min(optimal, 7) / 7) * 1.3;
-  return Math.min(100, Math.round(ratio * 100 * frequencyBonus));
+  return Math.min(100, Math.round(blendedRatio * 100 * frequencyBonus));
 }
 
 export function transitTimeFor(stool: StoolLog, logs: AnyLog[]): number | null {
