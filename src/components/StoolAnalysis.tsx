@@ -12,6 +12,7 @@
 
 import { useState } from "react";
 import { Brain, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Cpu, Zap } from "lucide-react";
+import { evaluateColorHealth } from "@/lib/stool-color";
 import { BRISTOL } from "@/lib/bristol";
 import type { ClassificationResult } from "@/lib/stool-classifier";
 import type { BristolType, StoolColor } from "@/lib/types";
@@ -111,7 +112,7 @@ function FeatureMeter({
 // ─────────────────────────────────────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────────────────────────────────────
-export function StoolAnalysis({ result, isAnalyzing, error, onApply }: Props) {
+export function StoolAnalysis({ result, isAnalyzing, error, onApply, color }: Props) {
   const [showDetails, setShowDetails] = useState(false);
   const [applied, setApplied] = useState(false);
 
@@ -206,6 +207,57 @@ export function StoolAnalysis({ result, isAnalyzing, error, onApply }: Props) {
             );
           })}
         </div>
+
+        {/* ── Color health ── */}
+        {color && color !== "unknown" && (() => {
+          const health = evaluateColorHealth(color);
+          const COLOR_HEX: Record<StoolColor, string> = {
+            brown: "#8B5A2B",
+            "light-brown": "#A0522D",
+            "yellow-brown": "#CD853F",
+            "pale-yellow": "#F0E68C",
+            green: "#6B8E23",
+            black: "#1C1C1C",
+            red: "#DC143C",
+            unknown: "#CCCCCC",
+          };
+          const COLOR_LABEL: Record<StoolColor, string> = {
+            brown: "Brown",
+            "light-brown": "Light Brown",
+            "yellow-brown": "Yellow-Brown",
+            "pale-yellow": "Pale Yellow",
+            green: "Green",
+            black: "Black",
+            red: "Red",
+            unknown: "Unknown",
+          };
+          return (
+            <div className="space-y-1">
+              <div className="text-xs font-medium text-[#5f6368] uppercase tracking-wide">Color</div>
+              <div
+                className="rounded-xl p-3 flex items-center gap-3"
+                style={{
+                  backgroundColor: health.isHealthy ? "#E8F5E9" : "#FFF3E0",
+                  borderLeft: `4px solid ${COLOR_HEX[color]}`,
+                }}
+              >
+                <div
+                  className="w-8 h-8 rounded-full border border-[#cccccc] shrink-0"
+                  style={{ backgroundColor: COLOR_HEX[color] }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className={`text-sm font-medium ${health.isHealthy ? "text-[#2E7D32]" : "text-[#E65100]"}`}>
+                    {COLOR_LABEL[color]} — {health.isHealthy ? "Healthy" : "Concerning"}
+                  </div>
+                  <div className="text-xs text-[#5f6368] mt-0.5">{health.message}</div>
+                  {health.concern && (
+                    <div className="text-xs text-[#C62828] mt-1">{health.concern}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ── Reasoning ── */}
         <div className="bg-[#f8f9fa] rounded-xl px-3 py-2">
