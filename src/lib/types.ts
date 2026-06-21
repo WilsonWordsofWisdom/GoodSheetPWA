@@ -2,6 +2,8 @@ export type LogType = "meal" | "exercise" | "stool";
 
 export type BristolType = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
+export type StoolColor = "brown" | "light-brown" | "yellow-brown" | "pale-yellow" | "green" | "black" | "red" | "unknown";
+
 export interface MealLog {
   id: string;
   type: "meal";
@@ -34,6 +36,7 @@ export interface StoolLog {
   bristol: BristolType;
   urgency?: "low" | "medium" | "high";
   ease?: "easy" | "normal" | "strained";
+  color?: StoolColor;
   note?: string;
   thumbnail?: string;
 }
