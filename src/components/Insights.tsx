@@ -2,6 +2,7 @@
 import { useState, useMemo } from "react";
 import type { AnyLog, MealLog, ExerciseLog, StoolLog } from "@/lib/types";
 import { findPatterns } from "@/lib/correlation";
+import { evaluateColorHealth, getColorScore } from "@/lib/stool-color";
 import { TrendingUp, AlertCircle, Sparkles, CalendarDays } from "lucide-react";
 import {
   BarChart,
@@ -85,6 +86,35 @@ function mealCals(l: MealLog): number {
   const mx = l.caloriesMax ?? 0;
   if (mn && mx) return Math.round((mn + mx) / 2);
   return mn || mx;
+}
+
+/* ─── Color analytics ────────────────────────────── */
+function getColorAnalytics(logs: AnyLog[]) {
+  const stools = logs.filter((l): l is StoolLog => l.type === "stool");
+  if (stools.length === 0) return null;
+
+  const coloredStools = stools.filter((s) => s.color);
+  if (coloredStools.length === 0) return null;
+
+  let healthyCount = 0;
+  let scoreSum = 0;
+  const colorCounts = new Map<string, number>();
+
+  for (const stool of coloredStools) {
+    const health = evaluateColorHealth(stool.color!);
+    if (health.isHealthy) healthyCount++;
+    scoreSum += getColorScore(stool.color);
+    colorCounts.set(stool.color!, (colorCounts.get(stool.color!) ?? 0) + 1);
+  }
+
+  return {
+    coloredCount: coloredStools.length,
+    totalCount: stools.length,
+    healthyCount,
+    healthyRate: healthyCount / coloredStools.length,
+    avgScore: scoreSum / coloredStools.length,
+    colorCounts,
+  };
 }
 
 /* ─── Custom legend strip ────────────────────────── */
@@ -410,6 +440,36 @@ export function Insights({ logs }: Props) {
           </div>
         )}
       </div>
+
+      {/* ── Color Pattern ── */}
+      {(() => {
+        const colorData = getColorAnalytics(logs);
+        if (!colorData) return (
+          <div className="bg-[#f8f9fa] rounded-2xl p-4 text-center text-xs text-[#9aa0a6]">
+            No color data yet — log stool entries with photos to see color insights.
+          </div>
+        );
+        return (
+          <div className="bg-[#FFF9E6] border border-[#F9D5A4] rounded-2xl p-4 space-y-3">
+            <div className="text-sm font-semibold text-[#202124]">Color Pattern</div>
+            <div className="text-xs text-[#5f6368]">
+              {colorData.coloredCount} of {colorData.totalCount} entries have color data
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between text-xs">
+                <span className="text-[#5f6368]">Healthy color rate</span>
+                <span className={colorData.healthyRate > 0.7 ? "text-[#34A853] font-medium" : "text-[#EA4335] font-medium"}>
+                  {Math.round(colorData.healthyRate * 100)}%
+                </span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-[#5f6368]">Avg color health score</span>
+                <span className="text-[#202124] font-medium">{Math.round(colorData.avgScore * 100)}/100</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <p className="text-xs text-[#9aa0a6] text-center px-4">
         Insights are correlations from your own logs, not medical advice.

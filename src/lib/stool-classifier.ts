@@ -27,7 +27,7 @@
  */
 
 import * as tf from "@tensorflow/tfjs";
-import type { BristolType } from "./types";
+import type { BristolType, StoolColor } from "./types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -51,6 +51,7 @@ export interface ClassificationResult {
   };
   reasoning: string;
   processingMs: number;
+  detectedColor?: StoolColor;
 }
 
 export type ClassificationStatus = "idle" | "analyzing" | "done" | "error";
@@ -180,6 +181,56 @@ function buildReasoning(f: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Color detection – samples pixels from a canvas drawn from the source element
+// ─────────────────────────────────────────────────────────────────────────────
+function detectStoolColorFromPixels(data: Uint8ClampedArray): StoolColor {
+  let redSum = 0, greenSum = 0, blueSum = 0, pixelCount = 0;
+
+  for (let i = 0; i < data.length; i += 16) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const a = data[i + 3];
+    if (a > 128) {
+      redSum += r;
+      greenSum += g;
+      blueSum += b;
+      pixelCount++;
+    }
+  }
+
+  if (pixelCount === 0) return "unknown";
+
+  const avgR = redSum / pixelCount;
+  const avgG = greenSum / pixelCount;
+  const avgB = blueSum / pixelCount;
+
+  const maxC = Math.max(avgR, avgG, avgB) / 255;
+  const minC = Math.min(avgR, avgG, avgB) / 255;
+  const lightness = (maxC + minC) / 2;
+
+  let hue = 0;
+  if (maxC !== minC) {
+    const delta = maxC - minC;
+    const rn = avgR / 255, gn = avgG / 255, bn = avgB / 255;
+    let h = 0;
+    if (maxC === rn) h = ((gn - bn) / delta) % 6;
+    else if (maxC === gn) h = (bn - rn) / delta + 2;
+    else h = (rn - gn) / delta + 4;
+    hue = (h * 60 + 360) % 360;
+  }
+
+  if (lightness < 0.2) return "black";
+  if (hue < 20 || hue >= 340) return "red";
+  if (hue >= 20 && hue < 40 && lightness >= 0.7) return "light-brown";
+  if (hue >= 20 && hue < 40) return "brown";
+  if (hue >= 40 && hue < 50 && lightness > 0.4) return "yellow-brown";
+  if (hue >= 50 && hue < 70) return "pale-yellow";
+  if (hue >= 80 && hue < 140) return "green";
+  return "brown";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -216,6 +267,14 @@ export async function classifyStoolImage(
 
   const best = candidates[0];
 
+  const canvas = document.createElement("canvas");
+  canvas.width = ANALYSIS_DIM;
+  canvas.height = ANALYSIS_DIM;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(source, 0, 0, ANALYSIS_DIM, ANALYSIS_DIM);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const detectedColor = detectStoolColorFromPixels(imageData.data);
+
   return {
     predicted: best.type,
     confidence: best.confidence,
@@ -223,6 +282,7 @@ export async function classifyStoolImage(
     features,
     reasoning: buildReasoning(features),
     processingMs: Math.round(performance.now() - t0),
+    detectedColor,
   };
 }
 
