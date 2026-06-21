@@ -2,11 +2,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Utensils, Activity, Droplet, X, Flame, CalendarClock } from "lucide-react";
 import { BristolPicker } from "./BristolPicker";
+import { ColorPicker } from "./ColorPicker";
 import { QuickChips } from "./QuickChips";
 import { FoodPicker } from "./FoodPicker";
 import { StoolAnalysis } from "./StoolAnalysis";
 import { FoodAnalysis } from "./FoodAnalysis";
-import type { AnyLog, BristolType, UserProfile } from "@/lib/types";
+import type { AnyLog, BristolType, StoolColor, UserProfile } from "@/lib/types";
 import { saveLog } from "@/lib/storage";
 import { estimateCalories } from "@/lib/calorie";
 import { estimateCaloriesBurned } from "@/lib/exercise-calories";
@@ -41,6 +42,7 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
   const [bristol, setBristol] = useState<BristolType | null>(null);
   const [urgency, setUrgency] = useState<"low" | "medium" | "high">("medium");
   const [ease, setEase] = useState<"easy" | "normal" | "strained">("normal");
+  const [color, setColor] = useState<StoolColor | undefined>(undefined);
   const [thumbnail, setThumbnail] = useState<string | undefined>(undefined);
   const [entryDatetime, setEntryDatetime] = useState(() => toDatetimeLocal(new Date()));
   // Bristol AI classifier state
@@ -67,7 +69,7 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
 
   const reset = () => {
     setFood(null); setTags([]); setNote(""); setActivity("Walk"); setIntensity("medium");
-    setDuration(20); setBristol(null); setUrgency("medium"); setEase("normal");
+    setDuration(20); setBristol(null); setUrgency("medium"); setEase("normal"); setColor(undefined);
     setThumbnail(undefined);
     setEntryDatetime(toDatetimeLocal(new Date()));
     setClassifyResult(null); setClassifyStatus("idle"); setClassifyError(undefined);
@@ -124,6 +126,9 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
         const result = await classifyStoolImage(imgEl);
         setClassifyResult(result);
         setClassifyStatus("done");
+        if (result.detectedColor) {
+          setColor(result.detectedColor);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setClassifyError(msg);
@@ -164,7 +169,7 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
     } else if (tab === "stool" && bristol) {
       log = {
         id, type: "stool", timestamp: ts,
-        bristol, urgency, ease,
+        bristol, urgency, ease, color,
         note: note || undefined,
         thumbnail: storeThumbnails ? thumbnail : undefined,
       };
@@ -233,6 +238,7 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
               isAnalyzing={classifyStatus === "analyzing"}
               error={classifyError}
               onApply={(t) => setBristol(t)}
+              color={color}
             />
           )}
 
@@ -371,6 +377,11 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
                   })}
                 </div>
               </div>
+              <ColorPicker
+                value={color}
+                onChange={setColor}
+                detectedColor={classifyResult?.detectedColor}
+              />
             </>
           )}
 

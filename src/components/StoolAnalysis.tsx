@@ -14,13 +14,14 @@ import { useState } from "react";
 import { Brain, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Cpu, Zap } from "lucide-react";
 import { BRISTOL } from "@/lib/bristol";
 import type { ClassificationResult } from "@/lib/stool-classifier";
-import type { BristolType } from "@/lib/types";
+import type { BristolType, StoolColor } from "@/lib/types";
 
 interface Props {
   result: ClassificationResult | null;
   isAnalyzing: boolean;
   error?: string;
   onApply: (type: BristolType) => void;
+  color?: StoolColor;
 }
 
 // Color per Bristol type (reuse from bristol.ts)
