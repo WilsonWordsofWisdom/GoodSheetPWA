@@ -1,13 +1,13 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Camera, Utensils, Activity, Droplet, X, Flame, CalendarClock } from "lucide-react";
+import { Camera, Utensils, Activity, Droplet, GlassWater, X, Flame, CalendarClock } from "lucide-react";
 import { BristolPicker } from "./BristolPicker";
 import { ColorPicker } from "./ColorPicker";
 import { QuickChips } from "./QuickChips";
 import { FoodPicker } from "./FoodPicker";
 import { StoolAnalysis } from "./StoolAnalysis";
 import { FoodAnalysis } from "./FoodAnalysis";
-import type { AnyLog, BristolType, StoolColor, UserProfile } from "@/lib/types";
+import type { AnyLog, BristolType, StoolColor, WaterLog, UserProfile } from "@/lib/types";
 import { saveLog } from "@/lib/storage";
 import { estimateCalories } from "@/lib/calorie";
 import { estimateCaloriesBurned } from "@/lib/exercise-calories";
@@ -27,11 +27,12 @@ interface Props {
   onSaved: () => void;
   storeThumbnails: boolean;
   userProfile?: UserProfile;
+  logs?: AnyLog[];
 }
 
-type Tab = "meal" | "exercise" | "stool";
+type Tab = "meal" | "exercise" | "stool" | "water";
 
-export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }: Props) {
+export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile, logs }: Props) {
   const [tab, setTab] = useState<Tab>("meal");
   const [food, setFood] = useState<FoodItem | null>(null);
   const [tags, setTags] = useState<string[]>([]);
@@ -54,6 +55,10 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
   const [foodClassifyStatus, setFoodClassifyStatus] = useState<FoodClassifyStatus>("idle");
   const [foodClassifyError, setFoodClassifyError] = useState<string | undefined>(undefined);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [waterSelectVal, setWaterSelectVal] = useState("");
+  const [waterCustomMl, setWaterCustomMl] = useState("");
+  const [waterFibreEnabled, setWaterFibreEnabled] = useState(false);
+  const [waterFibreG, setWaterFibreG] = useState("");
 
   // Reset datetime to now each time the logger opens
   useEffect(() => {
@@ -74,6 +79,7 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
     setEntryDatetime(toDatetimeLocal(new Date()));
     setClassifyResult(null); setClassifyStatus("idle"); setClassifyError(undefined);
     setFoodClassifyResult(null); setFoodClassifyStatus("idle"); setFoodClassifyError(undefined);
+    setWaterSelectVal(""); setWaterCustomMl(""); setWaterFibreEnabled(false); setWaterFibreG("");
   };
 
   const handleSelectFood = (f: FoodItem | null) => {
@@ -148,6 +154,7 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
         id, type: "meal", timestamp: ts, tags,
         foodName: food?.name,
         cuisine: food?.cuisine,
+        fiberG: food?.fiberG,
         note: note || undefined,
         caloriesMin: cal?.min, caloriesMax: cal?.max,
         thumbnail: storeThumbnails ? thumbnail : undefined,
@@ -173,6 +180,15 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
         note: note || undefined,
         thumbnail: storeThumbnails ? thumbnail : undefined,
       };
+    } else if (tab === "water") {
+      const ml = getEffectiveMl();
+      if (ml <= 0) return;
+      log = {
+        id, type: "water", timestamp: ts,
+        ml,
+        fiberG: waterFibreEnabled && waterFibreG ? parseFloat(waterFibreG) : undefined,
+        note: note || undefined,
+      } as WaterLog;
     }
 
     if (!log) return;
@@ -182,10 +198,16 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
     onClose();
   };
 
+  const getEffectiveMl = (): number => {
+    if (waterSelectVal === "other") return parseFloat(waterCustomMl) || 0;
+    return parseInt(waterSelectVal) || 0;
+  };
+
   const canSave =
     (tab === "meal" && (food !== null || tags.length > 0)) ||
     tab === "exercise" ||
-    (tab === "stool" && bristol !== null);
+    (tab === "stool" && bristol !== null) ||
+    (tab === "water" && getEffectiveMl() > 0);
 
   const mealCalories = food
     ? { min: food.kcalMin, max: food.kcalMax }
@@ -205,10 +227,11 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
         </div>
 
         <div className="px-4 pt-4">
-          <div className="grid grid-cols-3 gap-2 p-1 bg-[#f1f3f4] rounded-full">
+          <div className="grid grid-cols-4 gap-2 p-1 bg-[#f1f3f4] rounded-full">
             <TabBtn icon={<Utensils className="w-4 h-4" />} label="Food" active={tab === "meal"} onClick={() => setTab("meal")} />
             <TabBtn icon={<Activity className="w-4 h-4" />} label="Activity" active={tab === "exercise"} onClick={() => setTab("exercise")} />
             <TabBtn icon={<Droplet className="w-4 h-4" />} label="Stool" active={tab === "stool"} onClick={() => setTab("stool")} />
+            <TabBtn icon={<GlassWater className="w-4 h-4" />} label="Water" active={tab === "water"} onClick={() => setTab("water")} />
           </div>
         </div>
 
@@ -233,6 +256,7 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
 
           {/* AI classifier result – stool tab only */}
           {tab === "stool" && (classifyStatus === "analyzing" || classifyStatus === "done" || classifyStatus === "error") && (
+            // TODO Task 11: add logs and timestamp props once StoolAnalysis accepts them
             <StoolAnalysis
               result={classifyResult}
               isAnalyzing={classifyStatus === "analyzing"}
@@ -383,6 +407,77 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
                 detectedColor={classifyResult?.detectedColor}
               />
             </>
+          )}
+
+          {tab === "water" && (
+            <div className="space-y-4">
+              <div>
+                <label>Amount</label>
+                <select
+                  value={waterSelectVal}
+                  onChange={(e) => {
+                    setWaterSelectVal(e.target.value);
+                    if (e.target.value !== "other") setWaterCustomMl("");
+                  }}
+                  className="mt-2 w-full px-3 py-2.5 rounded-xl border border-[#dadce0] bg-white text-sm text-[#202124] focus:outline-none focus:border-[#4285F4]"
+                >
+                  <option value="">Select amount…</option>
+                  <option value="150">150 ml — small cup</option>
+                  <option value="250">250 ml — glass</option>
+                  <option value="400">400 ml — large glass</option>
+                  <option value="500">500 ml — bottle (small)</option>
+                  <option value="750">750 ml — bottle (medium)</option>
+                  <option value="1000">1 L — bottle (large)</option>
+                  <option value="1500">1.5 L — large bottle</option>
+                  <option value="2000">2 L — full bottle</option>
+                  <option value="other">Other amount…</option>
+                </select>
+              </div>
+
+              {waterSelectVal === "other" && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder="e.g. 330"
+                    value={waterCustomMl}
+                    onChange={(e) => setWaterCustomMl(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-xl border border-[#dadce0] bg-white text-sm focus:outline-none focus:border-[#4285F4]"
+                  />
+                  <span className="text-sm text-[#5f6368]">ml</span>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setWaterFibreEnabled((v) => !v)}
+                className="w-full flex items-center justify-between bg-[#f8f9fa] rounded-xl px-4 py-3 border border-[#e8eaed]"
+              >
+                <div className="text-left">
+                  <div className="text-sm text-[#202124]">Drink contains fibre?</div>
+                  <div className="text-xs text-[#5f6368]">e.g. juice, smoothie, kefir</div>
+                </div>
+                <div className={`w-11 h-6 rounded-full p-0.5 transition-colors ${waterFibreEnabled ? "bg-[#34A853]" : "bg-[#dadce0]"}`}>
+                  <div className={`w-5 h-5 rounded-full bg-white transition-transform ${waterFibreEnabled ? "translate-x-5" : ""}`} />
+                </div>
+              </button>
+
+              {waterFibreEnabled && (
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-[#5f6368] whitespace-nowrap">Fibre in drink</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    placeholder="grams"
+                    value={waterFibreG}
+                    onChange={(e) => setWaterFibreG(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-xl border border-[#dadce0] bg-white text-sm focus:outline-none focus:border-[#4285F4]"
+                  />
+                  <span className="text-sm text-[#5f6368]">g</span>
+                </div>
+              )}
+            </div>
           )}
 
           <div>
