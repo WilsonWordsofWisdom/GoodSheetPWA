@@ -1,5 +1,7 @@
-import type { AnyLog, MealLog, StoolLog, ExerciseLog, BristolType } from "./types";
+import type { AnyLog, MealLog, StoolLog, ExerciseLog, BristolType, UserProfile } from "./types";
 import { isHealthyColor, getColorScore } from "./stool-color";
+import { sevenDayAvgFibre } from "./fibre";
+import { sevenDayAvgHydration, smartHydrationTarget } from "./hydration";
 
 const HOUR = 3600 * 1000;
 const LOOKBACK_MS = 72 * HOUR;
@@ -29,7 +31,7 @@ export function isOptimalStool(s: StoolLog): boolean {
   );
 }
 
-export function gutScore(logs: AnyLog[], now = Date.now()): number {
+export function gutScore(logs: AnyLog[], profile?: UserProfile, now = Date.now()): number {
   const since = now - 7 * 24 * HOUR;
   const stools = logs.filter(
     (l): l is StoolLog => l.type === "stool" && l.timestamp >= since
@@ -37,21 +39,35 @@ export function gutScore(logs: AnyLog[], now = Date.now()): number {
   if (stools.length === 0) return 0;
 
   const optimal = stools.filter(isOptimalStool).length;
-  const ratio = optimal / stools.length;
+  const bristolRatio = optimal / stools.length;
 
-  let colorWeightedRatio = 0;
-  for (const stool of stools) {
-    if (isOptimalStool(stool)) {
-      colorWeightedRatio += getColorScore(stool.color);
-    }
+  let colorSum = 0;
+  for (const s of stools) {
+    if (isOptimalStool(s)) colorSum += getColorScore(s.color);
   }
-  colorWeightedRatio /= stools.length;
+  const colorRatio = colorSum / stools.length;
 
-  // Blend: 70% bristol/urgency/ease, 30% color weighting
-  const blendedRatio = ratio * 0.7 + colorWeightedRatio * 0.3;
+  const fiberTarget = profile?.fiberTargetG ?? 25;
+  const fibreAvg = sevenDayAvgFibre(logs, now);
+  const fibreScore = Math.min(1, fibreAvg / fiberTarget);
+
+  const baseHydration = profile?.hydrationTargetMl ?? 2000;
+  const hydrationTarget =
+    profile?.smartHydrationEnabled !== false
+      ? smartHydrationTarget(logs, baseHydration, now)
+      : baseHydration;
+  const hydrationScore = Math.min(1, sevenDayAvgHydration(logs, now) / hydrationTarget);
+
+  // Weights: bristol 50%, colour 20%, fibre 20%, hydration 10%
+  // Ref: Müller et al. (2020) Nutrients 12(7):1941; Kieffer et al. (2016) J Acad Nutr Diet
+  const blended =
+    bristolRatio * 0.5 +
+    colorRatio * 0.2 +
+    fibreScore * 0.2 +
+    hydrationScore * 0.1;
 
   const frequencyBonus = (Math.min(optimal, 7) / 7) * 1.3;
-  return Math.min(100, Math.round(blendedRatio * 100 * frequencyBonus));
+  return Math.min(100, Math.round(blended * 100 * frequencyBonus));
 }
 
 export function transitTimeFor(stool: StoolLog, logs: AnyLog[]): number | null {
@@ -177,13 +193,3 @@ export function recentExerciseCount(logs: AnyLog[], now = Date.now()): number {
   ).length;
 }
 
-export function fiberToday(logs: AnyLog[], now = Date.now()): number {
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  return logs.filter(
-    (l): l is MealLog =>
-      l.type === "meal" &&
-      l.timestamp >= start.getTime() &&
-      l.tags.some((t) => /fiber|fibre|oat|bean|lentil|veg|fruit|whole/i.test(t))
-  ).length;
-}
