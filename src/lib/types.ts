@@ -47,7 +47,8 @@ export interface WaterLog {
   type: "water";
   timestamp: number;
   ml: number;
-  fiberG?: number;
+  drinkId?: string;  // key into DRINK_MAP; absent on legacy records → treat as 'water'
+  fiberG?: number;   // legacy field kept for backward compat; superseded by drinkId
   note?: string;
 }
 
