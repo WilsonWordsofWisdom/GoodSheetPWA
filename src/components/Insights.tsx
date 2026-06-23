@@ -1,9 +1,11 @@
 "use client";
 import { useState, useMemo } from "react";
 import type { AnyLog, MealLog, ExerciseLog, StoolLog, WaterLog } from "@/lib/types";
+import { DRINK_MAP } from "@/lib/drinks";
+import type { GutDrinkTag } from "@/lib/drinks";
 import { findPatterns, isOptimalStool } from "@/lib/correlation";
 import { evaluateColorHealth, getColorScore } from "@/lib/stool-color";
-import { TrendingUp, AlertCircle, Sparkles, CalendarDays, Droplet, Leaf } from "lucide-react";
+import { TrendingUp, AlertCircle, Sparkles, CalendarDays, Droplet, Leaf, GlassWater } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -213,6 +215,50 @@ function getHydrationInsights(logs: AnyLog[], now = Date.now()) {
   }
 
   return { avgMl, daysMetTarget };
+}
+
+const TAG_LABELS: Record<string, string> = {
+  caffeine: 'Caffeine drinks',
+  lactose: 'Dairy / lactose',
+  alcohol: 'Alcohol',
+  fructose: 'High-fructose drinks',
+};
+
+function getDrinkTagInsights(logs: AnyLog[]) {
+  const stools = logs.filter((l): l is StoolLog => l.type === "stool");
+  if (stools.length < 3) return null;
+
+  const overallLooseRate = stools.filter((s) => s.bristol >= 6).length / stools.length;
+  const tags: GutDrinkTag[] = ['caffeine', 'lactose', 'alcohol', 'fructose'];
+  const results: {
+    tag: GutDrinkTag;
+    label: string;
+    withLooseRate: number;
+    overallLooseRate: number;
+    n: number;
+  }[] = [];
+
+  for (const tag of tags) {
+    let total = 0;
+    let loose = 0;
+    for (const stool of stools) {
+      const prior24h = stool.timestamp - 24 * HOUR;
+      const hasTag = logs.some(
+        (l): l is WaterLog =>
+          l.type === "water" &&
+          l.timestamp >= prior24h &&
+          l.timestamp < stool.timestamp &&
+          (DRINK_MAP.get(l.drinkId ?? 'water')?.gutTags.includes(tag) ?? false)
+      );
+      if (!hasTag) continue;
+      total++;
+      if (stool.bristol >= 6) loose++;
+    }
+    if (total < 3) continue;
+    results.push({ tag, label: TAG_LABELS[tag], withLooseRate: loose / total, overallLooseRate, n: total });
+  }
+
+  return results.length > 0 ? results : null;
 }
 
 /* ═══════════════════════════════════════════════════
@@ -598,6 +644,54 @@ export function Insights({ logs }: Props) {
                 <div className="text-xs text-[#5f6368] mt-0.5">{Math.round((hydData.daysMetTarget / 7) * 100)}% of week</div>
               </div>
             </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Drink & gut patterns ── */}
+      {(() => {
+        const drinkData = getDrinkTagInsights(logs);
+        if (!drinkData) return null;
+        return (
+          <div className="bg-white rounded-3xl border border-[#e8eaed] p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <GlassWater className="w-5 h-5 text-[#4285F4]" />
+              <h3 className="text-[#202124]">Drink &amp; gut patterns</h3>
+              <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-[#e8f0fe] text-[#1967d2] border border-[#b5d4f4]">
+                your data
+              </span>
+            </div>
+            <div className="space-y-4">
+              {drinkData.map((d) => {
+                const withPct = Math.round(d.withLooseRate * 100);
+                const basePct = Math.round(d.overallLooseRate * 100);
+                const elevated = d.withLooseRate > d.overallLooseRate * 1.3;
+                const barColor = elevated ? "#EA4335" : "#34A853";
+                return (
+                  <div key={d.tag} className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-[#202124]">{d.label}</span>
+                      <span className="text-xs font-medium" style={{ color: barColor }}>
+                        {withPct}% loose (n={d.n})
+                      </span>
+                    </div>
+                    <div className="relative h-2 bg-[#f1f3f4] rounded-full overflow-hidden">
+                      <div
+                        className="absolute inset-y-0 left-0 rounded-full"
+                        style={{ width: `${withPct}%`, backgroundColor: barColor }}
+                      />
+                    </div>
+                    <div className="text-[10px] text-[#9aa0a6]">
+                      your baseline (all stools): {basePct}% loose
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-xs text-[#5f6368] mt-3 leading-relaxed">
+              % of stools that were Bristol 6–7 in the 24h after consuming each drink type.
+              Ref: Rao et al. (1998) Eur J Gastroenterol Hepatol; Nilsson et al. (2019) Nutrients.
+            </p>
           </div>
         );
       })()}
