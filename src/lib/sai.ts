@@ -1,5 +1,6 @@
 import type { AnyLog, MealLog, StoolLog } from "./types";
-import { findPatterns, fiberToday, recentExerciseCount, gutScore } from "./correlation";
+import { findPatterns, recentExerciseCount, gutScore } from "./correlation";
+import { fibreToday } from "./fibre";
 
 const HOUR = 3600 * 1000;
 
@@ -38,7 +39,7 @@ export function saiReply(input: string, logs: AnyLog[]): SaiMessage {
   const now = Date.now();
 
   if (/eat|food|recommend|suggest/.test(q)) {
-    const fiber = fiberToday(logs);
+    const fiber = fibreToday(logs);
     const patterns = findPatterns(logs);
     const positive = patterns.filter((p) => p.outcome === "optimal").slice(0, 2);
     const avoid = patterns.filter((p) => p.outcome === "loose").slice(0, 2);
