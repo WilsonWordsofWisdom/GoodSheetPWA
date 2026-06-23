@@ -16,6 +16,7 @@ import { evaluateColorHealth } from "@/lib/stool-color";
 import { BRISTOL } from "@/lib/bristol";
 import type { ClassificationResult } from "@/lib/stool-classifier";
 import type { AnyLog, BristolType, MealLog, StoolColor, WaterLog } from "@/lib/types";
+import { DRINK_MAP } from "@/lib/drinks";
 
 interface Props {
   result: ClassificationResult | null;
@@ -114,24 +115,44 @@ function FeatureMeter({
 // ─────────────────────────────────────────────────────────────────────────────
 // Fibre context panel
 // ─────────────────────────────────────────────────────────────────────────────
+function drinkLogFibre(l: WaterLog): number {
+  if (l.drinkId) {
+    return Math.round((l.ml / 100) * (DRINK_MAP.get(l.drinkId)?.fiberGPer100ml ?? 0) * 10) / 10;
+  }
+  return l.fiberG ?? 0;
+}
+
 function FibreContextPanel({ logs, timestamp }: { logs: AnyLog[]; timestamp: number }) {
   const HOUR = 3600 * 1000;
   const prior24h = timestamp - 24 * HOUR;
+
+  const logFibre = (l: MealLog | WaterLog) =>
+    l.type === "meal" ? (l.fiberG ?? 0) : drinkLogFibre(l as WaterLog);
 
   const fibreLogs = logs.filter(
     (l): l is MealLog | WaterLog =>
       (l.type === "meal" || l.type === "water") &&
       l.timestamp >= prior24h &&
       l.timestamp < timestamp &&
-      (l.fiberG ?? 0) > 0
-  ) as (MealLog | WaterLog)[];
+      logFibre(l as MealLog | WaterLog) > 0
+  );
 
   if (fibreLogs.length === 0) return null;
 
-  const totalFibre = fibreLogs.reduce((sum, l) => sum + (l.fiberG ?? 0), 0);
-  const hydrationMl = logs
-    .filter((l): l is WaterLog => l.type === "water" && l.timestamp >= prior24h && l.timestamp < timestamp)
-    .reduce((sum, l) => sum + l.ml, 0);
+  const totalFibre = fibreLogs.reduce((sum, l) => sum + logFibre(l), 0);
+
+  const drinkLogs = logs.filter(
+    (l): l is WaterLog => l.type === "water" && l.timestamp >= prior24h && l.timestamp < timestamp
+  );
+  const netHydrationMl = drinkLogs.reduce((sum, l) => {
+    const factor = DRINK_MAP.get(l.drinkId ?? 'water')?.hydrationFactor ?? 1;
+    return sum + Math.round(l.ml * factor);
+  }, 0);
+
+  const gutTags = new Set<string>();
+  drinkLogs.forEach((l) => {
+    DRINK_MAP.get(l.drinkId ?? 'water')?.gutTags.forEach((t) => gutTags.add(t));
+  });
 
   const status = totalFibre >= 20 ? "Good intake" : totalFibre >= 10 ? "Moderate" : "Low intake";
   const statusColor = totalFibre >= 20 ? "#166534" : totalFibre >= 10 ? "#92400e" : "#991b1b";
@@ -157,9 +178,11 @@ function FibreContextPanel({ logs, timestamp }: { logs: AnyLog[]; timestamp: num
           {fibreLogs.slice(0, 4).map((l, i) => (
             <div key={i} className="flex items-center justify-between">
               <span className="text-xs text-[#202124] truncate mr-2">
-                {l.type === "meal" ? (l as MealLog).foodName || "Meal" : "Drink"}
+                {l.type === "meal"
+                  ? (l as MealLog).foodName || "Meal"
+                  : DRINK_MAP.get((l as WaterLog).drinkId ?? 'water')?.name ?? 'Drink'}
               </span>
-              <span className="text-xs font-medium text-[#16a34a] shrink-0">{l.fiberG}g</span>
+              <span className="text-xs font-medium text-[#16a34a] shrink-0">{logFibre(l)}g</span>
             </div>
           ))}
           {fibreLogs.length > 4 && (
@@ -170,9 +193,14 @@ function FibreContextPanel({ logs, timestamp }: { logs: AnyLog[]; timestamp: num
           <span className="text-xs font-medium text-[#166534]">Total fibre</span>
           <span className="text-sm font-medium text-[#16a34a]">{totalFibre.toFixed(1)}g</span>
         </div>
-        {hydrationMl > 0 && (
+        {netHydrationMl > 0 && (
           <div className="text-[10px] text-[#4ade80] mt-1">
-            Hydration: {hydrationMl.toLocaleString()} ml in 24h
+            Net hydration: ~{netHydrationMl.toLocaleString()} ml in 24h
+          </div>
+        )}
+        {gutTags.size > 0 && (
+          <div className="text-[10px] text-[#b45309] mt-0.5">
+            Drink gut factors: {Array.from(gutTags).join(', ')}
           </div>
         )}
       </div>
