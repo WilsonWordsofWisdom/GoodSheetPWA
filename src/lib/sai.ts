@@ -1,6 +1,7 @@
-import type { AnyLog, MealLog, StoolLog } from "./types";
+import type { AnyLog, MealLog, StoolLog, WaterLog } from "./types";
 import { findPatterns, recentExerciseCount, gutScore } from "./correlation";
 import { fibreToday } from "./fibre";
+import { DRINK_MAP } from "./drinks";
 
 const HOUR = 3600 * 1000;
 
@@ -56,6 +57,25 @@ export function saiReply(input: string, logs: AnyLog[]): SaiMessage {
     if (avoid.length) {
       parts.push(`Tags to keep an eye on: ${avoid.map((p) => "#" + p.tag).join(", ")}.`);
     }
+
+    const since7d = now - 7 * 24 * HOUR;
+    const recentDrinkTags = new Set<string>();
+    for (const l of logs) {
+      if (l.type === "water" && l.timestamp >= since7d) {
+        const tags = DRINK_MAP.get((l as WaterLog).drinkId ?? 'water')?.gutTags ?? [];
+        for (const t of tags) recentDrinkTags.add(t);
+      }
+    }
+    if (recentDrinkTags.has('caffeine')) {
+      parts.push("You've had caffeinated drinks this week — caffeine stimulates colonic motility and can cause loose stools in sensitive individuals (Rao et al. 1998).");
+    }
+    if (recentDrinkTags.has('lactose')) {
+      parts.push("You've had dairy-based drinks — if you notice loose stools, consider whether lactose tolerance may be a factor.");
+    }
+    if (recentDrinkTags.has('alcohol')) {
+      parts.push("Alcohol logs detected — alcohol impairs gut water absorption; compensate with extra water.");
+    }
+
     parts.push("These are patterns from your own logs, not medical advice.");
     return msg(parts.join(" "));
   }
