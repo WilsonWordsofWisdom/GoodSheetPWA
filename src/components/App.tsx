@@ -120,6 +120,7 @@ export default function App() {
         {tab === "home" && (
           <Home
             logs={logs}
+            profile={profile}
             reminders={reminders}
             onDeleteLog={handleDeleteLog}
             onLogEntry={() => setLoggerOpen(true)}
@@ -169,6 +170,7 @@ export default function App() {
         onSaved={refreshLogs}
         storeThumbnails={profile.storeThumbnails}
         userProfile={profile}
+        logs={logs}
       />
 
       <NotificationPanel
