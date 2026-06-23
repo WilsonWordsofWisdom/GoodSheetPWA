@@ -1,4 +1,4 @@
-export type LogType = "meal" | "exercise" | "stool";
+export type LogType = "meal" | "exercise" | "stool" | "water";
 
 export type BristolType = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
@@ -14,6 +14,7 @@ export interface MealLog {
   note?: string;
   caloriesMin?: number;
   caloriesMax?: number;
+  fiberG?: number;
   thumbnail?: string;
 }
 
@@ -41,7 +42,17 @@ export interface StoolLog {
   thumbnail?: string;
 }
 
-export type AnyLog = MealLog | ExerciseLog | StoolLog;
+export interface WaterLog {
+  id: string;
+  type: "water";
+  timestamp: number;
+  ml: number;
+  drinkId?: string;  // key into DRINK_MAP; absent on legacy records → treat as 'water'
+  fiberG?: number;   // legacy field kept for backward compat; superseded by drinkId
+  note?: string;
+}
+
+export type AnyLog = MealLog | ExerciseLog | StoolLog | WaterLog;
 
 export interface UserProfile {
   age?: number;
@@ -50,4 +61,7 @@ export interface UserProfile {
   goals: string[];
   storeThumbnails: boolean;
   onboardedAt: number;
+  hydrationTargetMl?: number;
+  fiberTargetG?: number;
+  smartHydrationEnabled?: boolean;
 }

@@ -1,6 +1,7 @@
 "use client";
 import { Utensils, Activity, Droplet, Trash2 } from "lucide-react";
-import type { AnyLog } from "@/lib/types";
+import type { AnyLog, WaterLog } from "@/lib/types";
+import { DRINK_MAP } from "@/lib/drinks";
 import { BRISTOL } from "@/lib/bristol";
 
 interface Props {
@@ -47,13 +48,15 @@ function Icon({ log }: { log: AnyLog }) {
   const cls = "w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-white";
   if (log.type === "meal") return <div className={cls} style={{ backgroundColor: "#FBBC05" }}><Utensils className="w-5 h-5" /></div>;
   if (log.type === "exercise") return <div className={cls} style={{ backgroundColor: "#34A853" }}><Activity className="w-5 h-5" /></div>;
-  return <div className={cls} style={{ backgroundColor: BRISTOL[log.bristol].color }}><Droplet className="w-5 h-5" /></div>;
+  if (log.type === "stool") return <div className={cls} style={{ backgroundColor: BRISTOL[log.bristol].color }}><Droplet className="w-5 h-5" /></div>;
+  return <div className={cls} style={{ backgroundColor: "#1967d2" }}><Droplet className="w-5 h-5" /></div>;
 }
 
 function labelFor(l: AnyLog) {
   if (l.type === "meal") return l.foodName ?? "Meal";
   if (l.type === "exercise") return l.activity;
-  return BRISTOL[l.bristol].label;
+  if (l.type === "stool") return BRISTOL[l.bristol].label;
+  return DRINK_MAP.get((l as WaterLog).drinkId ?? 'water')?.name ?? 'Drink';
 }
 
 function Body({ log }: { log: AnyLog }) {
@@ -77,11 +80,25 @@ function Body({ log }: { log: AnyLog }) {
       </div>
     );
   }
+  if (log.type === "stool") {
+    return (
+      <div className="mt-1 text-sm text-[#5f6368]">
+        {BRISTOL[log.bristol].description}
+        <div className="text-xs mt-0.5">urgency: {log.urgency} · ease: {log.ease}</div>
+        {log.note && <div className="text-xs mt-0.5 italic">{log.note}</div>}
+      </div>
+    );
+  }
+  const waterLog = log as WaterLog;
+  const drink = DRINK_MAP.get(waterLog.drinkId ?? 'water');
+  const netMl = drink ? Math.round(waterLog.ml * drink.hydrationFactor) : waterLog.ml;
+  const fibreG = drink ? Math.round((waterLog.ml / 100) * drink.fiberGPer100ml * 10) / 10 : 0;
   return (
     <div className="mt-1 text-sm text-[#5f6368]">
-      {BRISTOL[log.bristol].description}
-      <div className="text-xs mt-0.5">urgency: {log.urgency} · ease: {log.ease}</div>
-      {log.note && <div className="text-xs mt-0.5 italic">{log.note}</div>}
+      {waterLog.ml} ml
+      {drink && drink.hydrationFactor < 1 && <span> · ~{netMl} ml net</span>}
+      {fibreG > 0 && <span> · {fibreG}g fibre</span>}
+      {waterLog.note && <div className="text-xs mt-0.5 italic">{waterLog.note}</div>}
     </div>
   );
 }

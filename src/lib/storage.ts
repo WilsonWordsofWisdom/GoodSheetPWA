@@ -1,4 +1,5 @@
 import type { AnyLog, UserProfile } from "./types";
+import { DRINK_MAP } from "./drinks";
 
 const DB_NAME = "gutloop";
 const DB_VERSION = 1;
@@ -106,12 +107,16 @@ export async function exportCsv(): Promise<string> {
     "Entry Time",
     "Entry Type",
     "Food Name",
+    "Food Fibre (g)",
     "Activity Name",
     "Activity Intensity",
     "Activity Duration",
     "Stool Type (Bristol Scale)",
     "Stool Urgency",
     "Stool Ease of Passage",
+    "Drink (ml)",
+    "Drink Type",
+    "Drink Fibre (g)",
     "Notes",
   ];
 
@@ -124,17 +129,22 @@ export async function exportCsv(): Promise<string> {
       const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
       let type = "";
       let foodName = "";
+      let foodFibre = "";
       let activityName = "";
       let activityIntensity = "";
       let activityDuration = "";
       let bristol = "";
       let urgency = "";
       let ease = "";
+      let waterMl = "";
+      let drinkType = "";
+      let drinkFibre = "";
       const notes = log.note ?? "";
 
       if (log.type === "meal") {
         type = "Food";
         foodName = log.foodName ?? "";
+        foodFibre = log.fiberG != null ? String(log.fiberG) : "";
       } else if (log.type === "exercise") {
         type = "Activity";
         activityName = log.activity ?? "";
@@ -145,20 +155,21 @@ export async function exportCsv(): Promise<string> {
         bristol = log.bristol ? String(log.bristol) : "";
         urgency = log.urgency ?? "";
         ease = log.ease ?? "";
+      } else if (log.type === "water") {
+        type = "Drink";
+        waterMl = String(log.ml);
+        const drink = DRINK_MAP.get(log.drinkId ?? 'water');
+        drinkType = drink?.name ?? "Water";
+        const catalogueFibre = drink ? Math.round((log.ml / 100) * drink.fiberGPer100ml * 10) / 10 : 0;
+        drinkFibre = log.drinkId
+          ? (catalogueFibre > 0 ? String(catalogueFibre) : "")
+          : (log.fiberG != null ? String(log.fiberG) : "");
       }
 
       return [
-        date,
-        time,
-        type,
-        foodName,
-        activityName,
-        activityIntensity,
-        activityDuration,
-        bristol,
-        urgency,
-        ease,
-        notes,
+        date, time, type, foodName, foodFibre,
+        activityName, activityIntensity, activityDuration,
+        bristol, urgency, ease, waterMl, drinkType, drinkFibre, notes,
       ].map(csvEscape).join(",");
     });
 

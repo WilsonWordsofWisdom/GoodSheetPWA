@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Download, Trash2, Camera, Pencil } from "lucide-react";
+import { Download, Trash2, Camera, Pencil, Droplet, Leaf } from "lucide-react";
 import type { UserProfile } from "@/lib/types";
 import { exportCsv, clearAll, saveProfile } from "@/lib/storage";
 import { EditProfile } from "./EditProfile";
@@ -25,6 +25,26 @@ export function Settings({ profile, onProfileChange, onCleared }: Props) {
     onProfileChange(next);
   };
 
+  const toggleSmart = async () => {
+    const next = { ...profile, smartHydrationEnabled: !(profile.smartHydrationEnabled !== false) };
+    await saveProfile(next);
+    onProfileChange(next);
+  };
+
+  const setHydrationTarget = async (val: number) => {
+    if (isNaN(val) || val <= 0) return;
+    const next = { ...profile, hydrationTargetMl: val };
+    await saveProfile(next);
+    onProfileChange(next);
+  };
+
+  const setFibreTarget = async (val: number) => {
+    if (isNaN(val) || val <= 0) return;
+    const next = { ...profile, fiberTargetG: val };
+    await saveProfile(next);
+    onProfileChange(next);
+  };
+
   const handleExport = async () => {
     const csv = await exportCsv();
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -41,6 +61,10 @@ export function Settings({ profile, onProfileChange, onCleared }: Props) {
     await clearAll();
     onCleared();
   };
+
+  const smartEnabled = profile.smartHydrationEnabled !== false;
+  const hydrationTarget = profile.hydrationTargetMl ?? 2000;
+  const fibreTarget = profile.fiberTargetG ?? 25;
 
   return (
     <div className="space-y-4">
@@ -64,6 +88,70 @@ export function Settings({ profile, onProfileChange, onCleared }: Props) {
           onSave={handleProfileSave}
         />
       )}
+
+      <Section title="Hydration">
+        <div className="flex items-center justify-between py-3">
+          <div className="flex items-center gap-3">
+            <Droplet className="w-5 h-5 text-[#1967d2]" />
+            <div>
+              <div className="text-[#202124]">Daily target</div>
+              <div className="text-xs text-[#5f6368]">Baseline: 2,000 ml (EFSA 2010)</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={500}
+              max={5000}
+              step={50}
+              defaultValue={hydrationTarget}
+              onBlur={(e) => setHydrationTarget(parseInt(e.target.value))}
+              className="w-20 text-right px-2 py-1 rounded-lg border border-[#dadce0] text-sm text-[#1967d2] font-medium focus:outline-none focus:border-[#1967d2]"
+            />
+            <span className="text-xs text-[#5f6368]">ml</span>
+          </div>
+        </div>
+        <button onClick={toggleSmart} className="w-full flex items-center justify-between py-3">
+          <div className="text-left">
+            <div className="text-[#202124]">Smart adjustment</div>
+            <div className="text-xs text-[#5f6368]">Raises target when stools are firm or strained</div>
+          </div>
+          <div className={`w-11 h-6 rounded-full p-0.5 ${smartEnabled ? "bg-[#34A853]" : "bg-[#dadce0]"}`}>
+            <div className={`w-5 h-5 rounded-full bg-white transition-transform ${smartEnabled ? "translate-x-5" : ""}`} />
+          </div>
+        </button>
+        {smartEnabled && (
+          <div className="bg-[#fffbeb] rounded-xl px-3 py-2 mb-2 text-xs text-[#92400e] space-y-1">
+            <div>+250 ml if ≥2 stools are Bristol 1–3 in last 7 days</div>
+            <div>+250 ml if ≥2 passages were strained in last 7 days</div>
+            <div className="text-[#b45309]">Max auto-raise: +500 ml above your baseline</div>
+          </div>
+        )}
+      </Section>
+
+      <Section title="Dietary Fibre">
+        <div className="flex items-center justify-between py-3">
+          <div className="flex items-center gap-3">
+            <Leaf className="w-5 h-5 text-[#34A853]" />
+            <div>
+              <div className="text-[#202124]">Daily target</div>
+              <div className="text-xs text-[#5f6368]">Recommended: 25g/day (WHO 2003)</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={10}
+              max={60}
+              step={1}
+              defaultValue={fibreTarget}
+              onBlur={(e) => setFibreTarget(parseInt(e.target.value))}
+              className="w-16 text-right px-2 py-1 rounded-lg border border-[#dadce0] text-sm text-[#34A853] font-medium focus:outline-none focus:border-[#34A853]"
+            />
+            <span className="text-xs text-[#5f6368]">g</span>
+          </div>
+        </div>
+      </Section>
 
       <Section title="Photos">
         <button onClick={toggleThumbs} className="w-full flex items-center justify-between py-3">
@@ -105,10 +193,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
+function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between py-3">
-      <span className="flex items-center gap-2 text-[#202124]">{icon}{label}</span>
+      <span className="text-[#202124]">{label}</span>
       <span className="text-sm text-[#5f6368]">{value}</span>
     </div>
   );

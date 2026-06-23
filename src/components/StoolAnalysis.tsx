@@ -15,7 +15,8 @@ import { Brain, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Cpu, Zap } fr
 import { evaluateColorHealth } from "@/lib/stool-color";
 import { BRISTOL } from "@/lib/bristol";
 import type { ClassificationResult } from "@/lib/stool-classifier";
-import type { BristolType, StoolColor } from "@/lib/types";
+import type { AnyLog, BristolType, MealLog, StoolColor, WaterLog } from "@/lib/types";
+import { DRINK_MAP } from "@/lib/drinks";
 
 interface Props {
   result: ClassificationResult | null;
@@ -23,6 +24,8 @@ interface Props {
   error?: string;
   onApply: (type: BristolType) => void;
   color?: StoolColor;
+  logs?: AnyLog[];
+  timestamp?: number;
 }
 
 // Color per Bristol type (reuse from bristol.ts)
@@ -110,9 +113,105 @@ function FeatureMeter({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Fibre context panel
+// ─────────────────────────────────────────────────────────────────────────────
+function drinkLogFibre(l: WaterLog): number {
+  if (l.drinkId) {
+    return Math.round((l.ml / 100) * (DRINK_MAP.get(l.drinkId)?.fiberGPer100ml ?? 0) * 10) / 10;
+  }
+  return l.fiberG ?? 0;
+}
+
+function FibreContextPanel({ logs, timestamp }: { logs: AnyLog[]; timestamp: number }) {
+  const HOUR = 3600 * 1000;
+  const prior24h = timestamp - 24 * HOUR;
+
+  const logFibre = (l: MealLog | WaterLog) =>
+    l.type === "meal" ? (l.fiberG ?? 0) : drinkLogFibre(l as WaterLog);
+
+  const fibreLogs = logs.filter(
+    (l): l is MealLog | WaterLog =>
+      (l.type === "meal" || l.type === "water") &&
+      l.timestamp >= prior24h &&
+      l.timestamp < timestamp &&
+      logFibre(l as MealLog | WaterLog) > 0
+  );
+
+  if (fibreLogs.length === 0) return null;
+
+  const totalFibre = fibreLogs.reduce((sum, l) => sum + logFibre(l), 0);
+
+  const drinkLogs = logs.filter(
+    (l): l is WaterLog => l.type === "water" && l.timestamp >= prior24h && l.timestamp < timestamp
+  );
+  const netHydrationMl = drinkLogs.reduce((sum, l) => {
+    const factor = DRINK_MAP.get(l.drinkId ?? 'water')?.hydrationFactor ?? 1;
+    return sum + Math.round(l.ml * factor);
+  }, 0);
+
+  const gutTags = new Set<string>();
+  drinkLogs.forEach((l) => {
+    DRINK_MAP.get(l.drinkId ?? 'water')?.gutTags.forEach((t) => gutTags.add(t));
+  });
+
+  const status = totalFibre >= 20 ? "Good intake" : totalFibre >= 10 ? "Moderate" : "Low intake";
+  const statusColor = totalFibre >= 20 ? "#166534" : totalFibre >= 10 ? "#92400e" : "#991b1b";
+  const statusBg = totalFibre >= 20 ? "#dcfce7" : totalFibre >= 10 ? "#fef3c7" : "#fee2e2";
+
+  return (
+    <div className="space-y-1">
+      <div className="text-xs font-medium text-[#5f6368] uppercase tracking-wide">Fibre (prior 24h)</div>
+      <div className="rounded-xl p-3" style={{ backgroundColor: "#f0fdf4", borderLeft: "3px solid #22c55e" }}>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-5 h-5 rounded-full bg-[#22c55e] flex items-center justify-center shrink-0">
+            <span className="text-white text-[10px] font-bold">F</span>
+          </div>
+          <span className="text-xs font-medium text-[#166534]">Fibre before this stool</span>
+          <span
+            className="ml-auto text-[10px] px-2 py-0.5 rounded-full font-medium"
+            style={{ backgroundColor: statusBg, color: statusColor }}
+          >
+            {status}
+          </span>
+        </div>
+        <div className="space-y-1">
+          {fibreLogs.slice(0, 4).map((l, i) => (
+            <div key={i} className="flex items-center justify-between">
+              <span className="text-xs text-[#202124] truncate mr-2">
+                {l.type === "meal"
+                  ? (l as MealLog).foodName || "Meal"
+                  : DRINK_MAP.get((l as WaterLog).drinkId ?? 'water')?.name ?? 'Drink'}
+              </span>
+              <span className="text-xs font-medium text-[#16a34a] shrink-0">{logFibre(l)}g</span>
+            </div>
+          ))}
+          {fibreLogs.length > 4 && (
+            <div className="text-[10px] text-[#5f6368]">+{fibreLogs.length - 4} more</div>
+          )}
+        </div>
+        <div className="flex items-center justify-between border-t border-[#bbf7d0] mt-2 pt-2">
+          <span className="text-xs font-medium text-[#166534]">Total fibre</span>
+          <span className="text-sm font-medium text-[#16a34a]">{totalFibre.toFixed(1)}g</span>
+        </div>
+        {netHydrationMl > 0 && (
+          <div className="text-[10px] text-[#4ade80] mt-1">
+            Net hydration: ~{netHydrationMl.toLocaleString()} ml in 24h
+          </div>
+        )}
+        {gutTags.size > 0 && (
+          <div className="text-[10px] text-[#b45309] mt-0.5">
+            Drink gut factors: {Array.from(gutTags).join(', ')}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────────────────────────────────────
-export function StoolAnalysis({ result, isAnalyzing, error, onApply, color }: Props) {
+export function StoolAnalysis({ result, isAnalyzing, error, onApply, color, logs, timestamp }: Props) {
   const [showDetails, setShowDetails] = useState(false);
   const [applied, setApplied] = useState(false);
 
@@ -207,6 +306,11 @@ export function StoolAnalysis({ result, isAnalyzing, error, onApply, color }: Pr
             );
           })}
         </div>
+
+        {/* ── Fibre context ── */}
+        {logs && timestamp && (
+          <FibreContextPanel logs={logs} timestamp={timestamp} />
+        )}
 
         {/* ── Color health ── */}
         {color && color !== "unknown" && (() => {

@@ -1,14 +1,15 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Camera, Utensils, Activity, Droplet, X, Flame, CalendarClock } from "lucide-react";
+import { Camera, Utensils, Activity, Droplet, GlassWater, X, Flame, CalendarClock } from "lucide-react";
 import { BristolPicker } from "./BristolPicker";
 import { ColorPicker } from "./ColorPicker";
 import { QuickChips } from "./QuickChips";
 import { FoodPicker } from "./FoodPicker";
 import { StoolAnalysis } from "./StoolAnalysis";
 import { FoodAnalysis } from "./FoodAnalysis";
-import type { AnyLog, BristolType, StoolColor, UserProfile } from "@/lib/types";
+import type { AnyLog, BristolType, StoolColor, WaterLog, UserProfile } from "@/lib/types";
 import { saveLog } from "@/lib/storage";
+import { DRINK_MAP, DEFAULT_DRINK_ID } from "@/lib/drinks";
 import { estimateCalories } from "@/lib/calorie";
 import { estimateCaloriesBurned } from "@/lib/exercise-calories";
 import type { FoodItem } from "@/lib/foods";
@@ -27,11 +28,12 @@ interface Props {
   onSaved: () => void;
   storeThumbnails: boolean;
   userProfile?: UserProfile;
+  logs?: AnyLog[];
 }
 
-type Tab = "meal" | "exercise" | "stool";
+type Tab = "meal" | "exercise" | "stool" | "water";
 
-export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }: Props) {
+export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile, logs }: Props) {
   const [tab, setTab] = useState<Tab>("meal");
   const [food, setFood] = useState<FoodItem | null>(null);
   const [tags, setTags] = useState<string[]>([]);
@@ -54,6 +56,9 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
   const [foodClassifyStatus, setFoodClassifyStatus] = useState<FoodClassifyStatus>("idle");
   const [foodClassifyError, setFoodClassifyError] = useState<string | undefined>(undefined);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [waterSelectVal, setWaterSelectVal] = useState("");
+  const [waterCustomMl, setWaterCustomMl] = useState("");
+  const [waterDrinkId, setWaterDrinkId] = useState(DEFAULT_DRINK_ID);
 
   // Reset datetime to now each time the logger opens
   useEffect(() => {
@@ -74,6 +79,7 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
     setEntryDatetime(toDatetimeLocal(new Date()));
     setClassifyResult(null); setClassifyStatus("idle"); setClassifyError(undefined);
     setFoodClassifyResult(null); setFoodClassifyStatus("idle"); setFoodClassifyError(undefined);
+    setWaterSelectVal(""); setWaterCustomMl(""); setWaterDrinkId(DEFAULT_DRINK_ID);
   };
 
   const handleSelectFood = (f: FoodItem | null) => {
@@ -148,6 +154,7 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
         id, type: "meal", timestamp: ts, tags,
         foodName: food?.name,
         cuisine: food?.cuisine,
+        fiberG: food?.fiberG,
         note: note || undefined,
         caloriesMin: cal?.min, caloriesMax: cal?.max,
         thumbnail: storeThumbnails ? thumbnail : undefined,
@@ -173,6 +180,15 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
         note: note || undefined,
         thumbnail: storeThumbnails ? thumbnail : undefined,
       };
+    } else if (tab === "water") {
+      const ml = getEffectiveMl();
+      if (ml <= 0) return;
+      log = {
+        id, type: "water", timestamp: ts,
+        ml,
+        drinkId: waterDrinkId,
+        note: note || undefined,
+      } as WaterLog;
     }
 
     if (!log) return;
@@ -182,10 +198,16 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
     onClose();
   };
 
+  const getEffectiveMl = (): number => {
+    if (waterSelectVal === "other") return parseFloat(waterCustomMl) || 0;
+    return parseInt(waterSelectVal) || 0;
+  };
+
   const canSave =
     (tab === "meal" && (food !== null || tags.length > 0)) ||
     tab === "exercise" ||
-    (tab === "stool" && bristol !== null);
+    (tab === "stool" && bristol !== null) ||
+    (tab === "water" && getEffectiveMl() > 0);
 
   const mealCalories = food
     ? { min: food.kcalMin, max: food.kcalMax }
@@ -205,10 +227,11 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
         </div>
 
         <div className="px-4 pt-4">
-          <div className="grid grid-cols-3 gap-2 p-1 bg-[#f1f3f4] rounded-full">
+          <div className="grid grid-cols-4 gap-2 p-1 bg-[#f1f3f4] rounded-full">
             <TabBtn icon={<Utensils className="w-4 h-4" />} label="Food" active={tab === "meal"} onClick={() => setTab("meal")} />
             <TabBtn icon={<Activity className="w-4 h-4" />} label="Activity" active={tab === "exercise"} onClick={() => setTab("exercise")} />
             <TabBtn icon={<Droplet className="w-4 h-4" />} label="Stool" active={tab === "stool"} onClick={() => setTab("stool")} />
+            <TabBtn icon={<GlassWater className="w-4 h-4" />} label="Drink" active={tab === "water"} onClick={() => setTab("water")} />
           </div>
         </div>
 
@@ -233,6 +256,7 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
 
           {/* AI classifier result – stool tab only */}
           {tab === "stool" && (classifyStatus === "analyzing" || classifyStatus === "done" || classifyStatus === "error") && (
+            // TODO Task 11: add logs and timestamp props once StoolAnalysis accepts them
             <StoolAnalysis
               result={classifyResult}
               isAnalyzing={classifyStatus === "analyzing"}
@@ -383,6 +407,103 @@ export function Logger({ open, onClose, onSaved, storeThumbnails, userProfile }:
                 detectedColor={classifyResult?.detectedColor}
               />
             </>
+          )}
+
+          {tab === "water" && (
+            <div className="space-y-4">
+              <div>
+                <label>Drink type</label>
+                <select
+                  value={waterDrinkId}
+                  onChange={(e) => setWaterDrinkId(e.target.value)}
+                  className="mt-2 w-full px-3 py-2.5 rounded-xl border border-[#dadce0] bg-white text-sm text-[#202124] focus:outline-none focus:border-[#4285F4]"
+                >
+                  <optgroup label="Water">
+                    <option value="water">Water</option>
+                    <option value="sparkling-water">Sparkling Water</option>
+                    <option value="coconut-water">Coconut Water</option>
+                    <option value="sports-drink">Sports / Isotonic Drink</option>
+                  </optgroup>
+                  <optgroup label="Hot Drinks">
+                    <option value="coffee">Coffee</option>
+                    <option value="espresso">Espresso</option>
+                    <option value="black-tea">Black Tea</option>
+                    <option value="green-tea">Green Tea</option>
+                    <option value="herbal-tea">Herbal Tea</option>
+                  </optgroup>
+                  <optgroup label="Dairy">
+                    <option value="milk">Milk</option>
+                    <option value="chocolate-milk">Chocolate Milk</option>
+                    <option value="hot-chocolate">Hot Chocolate</option>
+                  </optgroup>
+                  <optgroup label="Juice &amp; Smoothie">
+                    <option value="orange-juice">Orange Juice</option>
+                    <option value="apple-juice">Apple Juice</option>
+                    <option value="tomato-juice">Tomato Juice</option>
+                    <option value="fruit-smoothie">Fruit Smoothie</option>
+                    <option value="green-smoothie">Green Smoothie</option>
+                  </optgroup>
+                  <optgroup label="Alcohol">
+                    <option value="beer">Beer</option>
+                    <option value="wine">Wine</option>
+                    <option value="spirits">Spirits</option>
+                  </optgroup>
+                </select>
+              </div>
+
+              <div>
+                <label>Amount</label>
+                <select
+                  value={waterSelectVal}
+                  onChange={(e) => {
+                    setWaterSelectVal(e.target.value);
+                    if (e.target.value !== "other") setWaterCustomMl("");
+                  }}
+                  className="mt-2 w-full px-3 py-2.5 rounded-xl border border-[#dadce0] bg-white text-sm text-[#202124] focus:outline-none focus:border-[#4285F4]"
+                >
+                  <option value="">Select amount…</option>
+                  <option value="150">150 ml — small cup</option>
+                  <option value="250">250 ml — glass</option>
+                  <option value="400">400 ml — large glass</option>
+                  <option value="500">500 ml — bottle (small)</option>
+                  <option value="750">750 ml — bottle (medium)</option>
+                  <option value="1000">1 L — bottle (large)</option>
+                  <option value="1500">1.5 L — large bottle</option>
+                  <option value="2000">2 L — full bottle</option>
+                  <option value="other">Other amount…</option>
+                </select>
+              </div>
+
+              {waterSelectVal === "other" && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder="e.g. 330"
+                    value={waterCustomMl}
+                    onChange={(e) => setWaterCustomMl(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-xl border border-[#dadce0] bg-white text-sm focus:outline-none focus:border-[#4285F4]"
+                  />
+                  <span className="text-sm text-[#5f6368]">ml</span>
+                </div>
+              )}
+
+              {getEffectiveMl() > 0 && (() => {
+                const drink = DRINK_MAP.get(waterDrinkId)!;
+                const ml = getEffectiveMl();
+                const netMl = Math.round(ml * drink.hydrationFactor);
+                const fibreG = Math.round((ml / 100) * drink.fiberGPer100ml * 10) / 10;
+                return (
+                  <div className="bg-[#e8f0fe] rounded-xl p-3 text-sm text-[#1967d2] space-y-1">
+                    <div>Net hydration: ~{netMl} ml water equivalent</div>
+                    {fibreG > 0 && <div className="text-[#34A853]">Fibre: ~{fibreG}g</div>}
+                    {drink.gutTags.length > 0 && (
+                      <div className="text-xs text-[#5f6368]">Contains: {drink.gutTags.join(', ')}</div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
           )}
 
           <div>
