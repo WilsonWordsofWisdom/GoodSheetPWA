@@ -1,4 +1,5 @@
 import type { AnyLog, StoolLog, WaterLog } from "./types";
+import { DRINK_MAP } from "./drinks";
 
 const HOUR = 3600 * 1000;
 
@@ -7,14 +8,20 @@ export function hydrationToday(logs: AnyLog[], now = Date.now()): number {
   start.setHours(0, 0, 0, 0);
   return logs
     .filter((l): l is WaterLog => l.type === "water" && l.timestamp >= start.getTime())
-    .reduce((sum, l) => sum + l.ml, 0);
+    .reduce((sum, l) => {
+      const factor = DRINK_MAP.get(l.drinkId ?? 'water')?.hydrationFactor ?? 1;
+      return sum + Math.round(l.ml * factor);
+    }, 0);
 }
 
 export function sevenDayAvgHydration(logs: AnyLog[], now = Date.now()): number {
   const since = now - 7 * 24 * HOUR;
   const totalMl = logs
     .filter((l): l is WaterLog => l.type === "water" && l.timestamp >= since)
-    .reduce((sum, l) => sum + l.ml, 0);
+    .reduce((sum, l) => {
+      const factor = DRINK_MAP.get(l.drinkId ?? 'water')?.hydrationFactor ?? 1;
+      return sum + Math.round(l.ml * factor);
+    }, 0);
   return totalMl / 7;
 }
 
