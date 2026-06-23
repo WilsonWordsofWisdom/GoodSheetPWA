@@ -1,4 +1,5 @@
 import type { AnyLog, UserProfile } from "./types";
+import { DRINK_MAP } from "./drinks";
 
 const DB_NAME = "gutloop";
 const DB_VERSION = 1;
@@ -113,7 +114,8 @@ export async function exportCsv(): Promise<string> {
     "Stool Type (Bristol Scale)",
     "Stool Urgency",
     "Stool Ease of Passage",
-    "Water (ml)",
+    "Drink (ml)",
+    "Drink Type",
     "Drink Fibre (g)",
     "Notes",
   ];
@@ -135,6 +137,7 @@ export async function exportCsv(): Promise<string> {
       let urgency = "";
       let ease = "";
       let waterMl = "";
+      let drinkType = "";
       let drinkFibre = "";
       const notes = log.note ?? "";
 
@@ -153,15 +156,20 @@ export async function exportCsv(): Promise<string> {
         urgency = log.urgency ?? "";
         ease = log.ease ?? "";
       } else if (log.type === "water") {
-        type = "Water";
+        type = "Drink";
         waterMl = String(log.ml);
-        drinkFibre = log.fiberG != null ? String(log.fiberG) : "";
+        const drink = DRINK_MAP.get(log.drinkId ?? 'water');
+        drinkType = drink?.name ?? "Water";
+        const catalogueFibre = drink ? Math.round((log.ml / 100) * drink.fiberGPer100ml * 10) / 10 : 0;
+        drinkFibre = log.drinkId
+          ? (catalogueFibre > 0 ? String(catalogueFibre) : "")
+          : (log.fiberG != null ? String(log.fiberG) : "");
       }
 
       return [
         date, time, type, foodName, foodFibre,
         activityName, activityIntensity, activityDuration,
-        bristol, urgency, ease, waterMl, drinkFibre, notes,
+        bristol, urgency, ease, waterMl, drinkType, drinkFibre, notes,
       ].map(csvEscape).join(",");
     });
 
