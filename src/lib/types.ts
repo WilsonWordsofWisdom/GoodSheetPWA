@@ -64,4 +64,5 @@ export interface UserProfile {
   hydrationTargetMl?: number;
   fiberTargetG?: number;
   smartHydrationEnabled?: boolean;
+  shareData?: boolean;
 }
