@@ -23,6 +23,7 @@ import {
   deleteLog,
 } from "@/lib/storage";
 import { checkReminders } from "@/lib/sai";
+import { ReferenceDataProvider } from "@/lib/ReferenceDataContext";
 
 const NOTIF_SEEN_KEY = "goodshit_notif_seen";
 
@@ -91,10 +92,15 @@ export default function App() {
   }
 
   if (!profile) {
-    return <Onboarding onComplete={handleOnboard} />;
+    return (
+      <ReferenceDataProvider>
+        <Onboarding onComplete={handleOnboard} />
+      </ReferenceDataProvider>
+    );
   }
 
   return (
+    <ReferenceDataProvider>
     <div className="size-full bg-[#f8f9fa] flex flex-col">
       <header className="bg-white border-b border-[#e8eaed] px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -180,6 +186,7 @@ export default function App() {
         readNotifs={readNotifs}
       />
     </div>
+    </ReferenceDataProvider>
   );
 }
 
