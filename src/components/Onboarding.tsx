@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import type { UserProfile } from "@/lib/types";
 import { AppIcon } from "./AppIcon";
-import { GOALS } from "@/lib/goals";
+import { useReferenceData } from "@/lib/ReferenceDataContext";
 
 interface Props {
   onComplete: (p: UserProfile) => void;
@@ -21,6 +21,7 @@ export function Onboarding({ onComplete }: Props) {
   const [height, setHeight] = useState<number | "">("");
   const [goals, setGoals] = useState<string[]>([]);
   const [storeThumbs, setStoreThumbs] = useState(false);
+  const { goals: GOALS } = useReferenceData();
 
   const [errors, setErrors] = useState<{ age?: string; weight?: string; height?: string }>({});
   const [showAgeBlock, setShowAgeBlock] = useState(false);
