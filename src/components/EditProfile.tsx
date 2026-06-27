@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import type { UserProfile } from "@/lib/types";
-import { GOALS } from "@/lib/goals";
+import { useReferenceData } from "@/lib/ReferenceDataContext";
 
 interface Props {
   profile: UserProfile;
@@ -15,6 +15,7 @@ export function EditProfile({ profile, onClose, onSave }: Props) {
   const [weight, setWeight] = useState<number | "">(profile.weightKg ?? "");
   const [height, setHeight] = useState<number | "">(profile.heightCm ?? "");
   const [goals, setGoals] = useState<string[]>(profile.goals ?? []);
+  const { goals: GOALS } = useReferenceData();
 
   const toggleGoal = (g: string) =>
     setGoals((prev) => (prev.includes(g) ? prev.filter((x) => x !== g) : [...prev, g]));

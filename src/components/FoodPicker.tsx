@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X, ChevronDown } from "lucide-react";
-import { FOODS, searchFoods, type FoodItem } from "@/lib/foods";
+import { type FoodItem } from "@/lib/foods";
+import { useReferenceData } from "@/lib/ReferenceDataContext";
 
 interface Props {
   value: FoodItem | null;
@@ -12,14 +13,23 @@ export function FoodPicker({ value, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+  const { foods } = useReferenceData();
 
   const cuisines = useMemo(() => {
     const set = new Set<string>();
-    for (const f of FOODS) set.add(f.cuisine);
+    for (const f of foods) set.add(f.cuisine);
     return Array.from(set);
-  }, []);
+  }, [foods]);
 
-  const results = useMemo(() => searchFoods(query, 80), [query]);
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const matches = q
+      ? foods.filter(
+          (f) => f.name.toLowerCase().includes(q) || f.cuisine.toLowerCase().includes(q)
+        )
+      : foods;
+    return matches.slice(0, 80);
+  }, [foods, query]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, FoodItem[]>();

@@ -21,8 +21,17 @@ import {
   getProfile,
   saveProfile,
   deleteLog,
+  saveLog,
 } from "@/lib/storage";
+import {
+  ensureAnonymousAuth,
+  syncProfile,
+  pushLogs,
+  pullMissingLogs,
+  deleteRemoteLog,
+} from "@/lib/sync";
 import { checkReminders } from "@/lib/sai";
+import { ReferenceDataProvider } from "@/lib/ReferenceDataContext";
 
 const NOTIF_SEEN_KEY = "goodshit_notif_seen";
 
@@ -38,6 +47,7 @@ type Tab = "home" | "insights" | "sai" | "settings";
 
 export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [logs, setLogs] = useState<AnyLog[]>([]);
   const [tab, setTab] = useState<Tab>("home");
@@ -51,19 +61,49 @@ export default function App() {
       setProfile(p);
       setLogs(l);
       setLoaded(true);
+
+      // Establish anonymous identity (no-op offline / unconfigured).
+      const uid = await ensureAnonymousAuth();
+      setUserId(uid);
+      if (uid && p) {
+        await syncProfile(p, uid);
+        if (p.shareData) {
+          const localIds = new Set(l.map((x) => x.id));
+          const missing = await pullMissingLogs(uid, localIds);
+          for (const m of missing) await saveLog(m);
+          const merged = missing.length ? await getAllLogs() : l;
+          if (missing.length) setLogs(merged);
+          await pushLogs(merged, uid, true);
+        }
+      }
     })();
   }, []);
 
-  const refreshLogs = async () => setLogs(await getAllLogs());
+  const refreshLogs = async () => {
+    const l = await getAllLogs();
+    setLogs(l);
+    if (profile?.shareData && userId) await pushLogs(l, userId, true);
+  };
 
   const handleOnboard = async (p: UserProfile) => {
     await saveProfile(p);
     setProfile(p);
   };
 
+  // Settings edits flow through here so a profile row exists before any log
+  // sync (logs.user_id FKs profiles.id), and opting in pushes existing logs.
+  const handleProfileChange = async (p: UserProfile) => {
+    setProfile(p);
+    if (userId) {
+      await syncProfile(p, userId);
+      if (p.shareData) await pushLogs(await getAllLogs(), userId, true);
+    }
+  };
+
   const handleDeleteLog = async (id: string) => {
     await deleteLog(id);
-    refreshLogs();
+    if (profile?.shareData && userId) await deleteRemoteLog(id, userId);
+    setLogs(await getAllLogs());
   };
 
   const handleCleared = async () => {
@@ -91,10 +131,15 @@ export default function App() {
   }
 
   if (!profile) {
-    return <Onboarding onComplete={handleOnboard} />;
+    return (
+      <ReferenceDataProvider>
+        <Onboarding onComplete={handleOnboard} />
+      </ReferenceDataProvider>
+    );
   }
 
   return (
+    <ReferenceDataProvider>
     <div className="size-full bg-[#f8f9fa] flex flex-col">
       <header className="bg-white border-b border-[#e8eaed] px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -131,7 +176,7 @@ export default function App() {
         {tab === "settings" && (
           <Settings
             profile={profile}
-            onProfileChange={setProfile}
+            onProfileChange={handleProfileChange}
             onCleared={handleCleared}
           />
         )}
@@ -180,6 +225,7 @@ export default function App() {
         readNotifs={readNotifs}
       />
     </div>
+    </ReferenceDataProvider>
   );
 }
 
