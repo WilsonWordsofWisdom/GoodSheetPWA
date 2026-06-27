@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Download, Trash2, Camera, Pencil, Droplet, Leaf } from "lucide-react";
+import { Download, Trash2, Camera, Pencil, Droplet, Leaf, Cloud } from "lucide-react";
 import type { UserProfile } from "@/lib/types";
 import { exportCsv, clearAll, saveProfile } from "@/lib/storage";
 import { EditProfile } from "./EditProfile";
@@ -27,6 +27,12 @@ export function Settings({ profile, onProfileChange, onCleared }: Props) {
 
   const toggleSmart = async () => {
     const next = { ...profile, smartHydrationEnabled: !(profile.smartHydrationEnabled !== false) };
+    await saveProfile(next);
+    onProfileChange(next);
+  };
+
+  const toggleShareData = async () => {
+    const next = { ...profile, shareData: !profile.shareData };
     await saveProfile(next);
     onProfileChange(next);
   };
@@ -166,6 +172,26 @@ export function Settings({ profile, onProfileChange, onCleared }: Props) {
             <div className={`w-5 h-5 rounded-full bg-white transition-transform ${profile.storeThumbnails ? "translate-x-5" : ""}`} />
           </div>
         </button>
+      </Section>
+
+      <Section title="Cloud sync">
+        <button onClick={toggleShareData} className="w-full flex items-center justify-between py-3">
+          <div className="flex items-center gap-3">
+            <Cloud className="w-5 h-5 text-[#1967d2]" />
+            <div className="text-left">
+              <div className="text-[#202124]">Share data to improve diagnosis</div>
+              <div className="text-xs text-[#5f6368]">Opt-in. Syncs your logs anonymously to our servers.</div>
+            </div>
+          </div>
+          <div className={`w-11 h-6 rounded-full p-0.5 ${profile.shareData ? "bg-[#34A853]" : "bg-[#dadce0]"}`}>
+            <div className={`w-5 h-5 rounded-full bg-white transition-transform ${profile.shareData ? "translate-x-5" : ""}`} />
+          </div>
+        </button>
+        {profile.shareData && (
+          <div className="bg-[#e8f0fe] rounded-xl px-3 py-2 mb-2 text-xs text-[#1967d2]">
+            Your logs sync to our database under an anonymous ID to help improve gut-score accuracy, correlation analysis, and SAI. No name or email is attached. Turn off any time to stop syncing.
+          </div>
+        )}
       </Section>
 
       <Section title="Data">
