@@ -21,7 +21,15 @@ import {
   getProfile,
   saveProfile,
   deleteLog,
+  saveLog,
 } from "@/lib/storage";
+import {
+  ensureAnonymousAuth,
+  syncProfile,
+  pushLogs,
+  pullMissingLogs,
+  deleteRemoteLog,
+} from "@/lib/sync";
 import { checkReminders } from "@/lib/sai";
 import { ReferenceDataProvider } from "@/lib/ReferenceDataContext";
 
@@ -39,6 +47,7 @@ type Tab = "home" | "insights" | "sai" | "settings";
 
 export default function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [logs, setLogs] = useState<AnyLog[]>([]);
   const [tab, setTab] = useState<Tab>("home");
@@ -52,10 +61,29 @@ export default function App() {
       setProfile(p);
       setLogs(l);
       setLoaded(true);
+
+      // Establish anonymous identity (no-op offline / unconfigured).
+      const uid = await ensureAnonymousAuth();
+      setUserId(uid);
+      if (uid && p) {
+        await syncProfile(p, uid);
+        if (p.shareData) {
+          const localIds = new Set(l.map((x) => x.id));
+          const missing = await pullMissingLogs(uid, localIds);
+          for (const m of missing) await saveLog(m);
+          const merged = missing.length ? await getAllLogs() : l;
+          if (missing.length) setLogs(merged);
+          await pushLogs(merged, uid, true);
+        }
+      }
     })();
   }, []);
 
-  const refreshLogs = async () => setLogs(await getAllLogs());
+  const refreshLogs = async () => {
+    const l = await getAllLogs();
+    setLogs(l);
+    if (profile?.shareData && userId) await pushLogs(l, userId, true);
+  };
 
   const handleOnboard = async (p: UserProfile) => {
     await saveProfile(p);
@@ -64,7 +92,8 @@ export default function App() {
 
   const handleDeleteLog = async (id: string) => {
     await deleteLog(id);
-    refreshLogs();
+    if (profile?.shareData && userId) await deleteRemoteLog(id, userId);
+    setLogs(await getAllLogs());
   };
 
   const handleCleared = async () => {
