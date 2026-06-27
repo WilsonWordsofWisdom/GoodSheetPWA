@@ -90,6 +90,16 @@ export default function App() {
     setProfile(p);
   };
 
+  // Settings edits flow through here so a profile row exists before any log
+  // sync (logs.user_id FKs profiles.id), and opting in pushes existing logs.
+  const handleProfileChange = async (p: UserProfile) => {
+    setProfile(p);
+    if (userId) {
+      await syncProfile(p, userId);
+      if (p.shareData) await pushLogs(await getAllLogs(), userId, true);
+    }
+  };
+
   const handleDeleteLog = async (id: string) => {
     await deleteLog(id);
     if (profile?.shareData && userId) await deleteRemoteLog(id, userId);
@@ -166,7 +176,7 @@ export default function App() {
         {tab === "settings" && (
           <Settings
             profile={profile}
-            onProfileChange={setProfile}
+            onProfileChange={handleProfileChange}
             onCleared={handleCleared}
           />
         )}
