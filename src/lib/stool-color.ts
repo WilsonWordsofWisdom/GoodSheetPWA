@@ -1,4 +1,6 @@
-import type { StoolColor } from "./types";
+import type { StoolColor, StoolLog, MealLog, AnyLog } from "./types";
+
+const HOUR = 3600 * 1000;
 
 export interface ColorHealth {
   isHealthy: boolean;
@@ -66,4 +68,46 @@ export function isHealthyColor(color?: StoolColor): boolean {
 export function getColorScore(color?: StoolColor): number {
   if (!color) return 1.0;
   return COLOR_HEALTH[color].score;
+}
+
+const COLOR_EXPLAINERS: Record<"black" | "red", string[]> = {
+  black: [
+    "iron supplement", "iron tablet", "bismuth", "pepto", "black licorice",
+    "activated charcoal", "blueberry", "blackberry", "black pudding", "blood",
+  ],
+  red: [
+    "beetroot", "beet", "red dragon fruit", "tomato juice", "red food coloring",
+    "red velvet", "cranberry", "pomegranate", "red gummy", "hawthorn",
+  ],
+};
+
+// Looks for a meal in the 48h before a black/red stool that's a known benign
+// cause of dark/red stool (iron, beets, dye, etc). Returns the matching food
+// name, or null if no explanation is found — used to distinguish a benign
+// dietary cause from a potential GI-bleed signal.
+export function findColorExplainer(stool: StoolLog, logs: AnyLog[]): string | null {
+  if (stool.color !== "black" && stool.color !== "red") return null;
+  const since = stool.timestamp - 48 * HOUR;
+  const meals = logs.filter(
+    (l): l is MealLog =>
+      l.type === "meal" && l.timestamp >= since && l.timestamp < stool.timestamp && !!l.foodName
+  );
+  for (const m of meals) {
+    const name = m.foodName!.toLowerCase();
+    if (COLOR_EXPLAINERS[stool.color as "black" | "red"].some((kw) => name.includes(kw))) {
+      return m.foodName!;
+    }
+  }
+  return null;
+}
+
+// Color score used by gutScore. Unlike getColorScore, an unexplained black/red
+// stool (no dietary cause found) drops to a severe 0.05 instead of 0.2/0.3,
+// since it's a potential GI-bleed signal, not just an "unhealthy" color.
+export function adjustedColorScore(stool: StoolLog, logs: AnyLog[]): number {
+  const base = getColorScore(stool.color);
+  if (stool.color === "black" || stool.color === "red") {
+    return findColorExplainer(stool, logs) ? Math.max(base, 0.55) : 0.05;
+  }
+  return base;
 }
