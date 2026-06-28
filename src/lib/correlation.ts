@@ -203,40 +203,58 @@ export function goodShitStreak(logs: AnyLog[], now = Date.now()): { current: num
   const stools = logs.filter((l): l is StoolLog => l.type === "stool");
   if (stools.length === 0) return { current: 0, best: 0, goodToday: false };
 
-  const dayKey = (ts: number) => {
-    const d = new Date(ts);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime();
-  };
-
   const goodDays = new Set<number>();
   for (const s of stools) {
     if (categoryOf(s.bristol) === "optimal") goodDays.add(dayKey(s.timestamp));
   }
 
+  const anyLogDays = new Set<number>();
+  for (const l of logs) anyLogDays.add(dayKey(l.timestamp));
+
   const today = dayKey(now);
-  const yesterday = today - 24 * HOUR;
   const goodToday = goodDays.has(today);
 
-  let current = 0;
-  let cursor = goodToday ? today : yesterday;
-  while (goodDays.has(cursor)) {
-    current++;
-    cursor -= 24 * HOUR;
+  // Walks backward from `startDay`: extends on good days, freezes through
+  // unlogged gaps (<5 consecutive days, since a forgotten log shouldn't read
+  // the same as a bad outcome), and breaks on a logged-but-not-good day or a
+  // 5+ day unlogged gap.
+  //
+  // Caps the backward walk at ~2 years so a multi-year power user's "best
+  // streak" computation (called once per good day) stays bounded — beyond
+  // that, the exact historical streak length isn't worth the O(N) cost per
+  // call. A streak this long is already well past what the UI needs to show
+  // precisely.
+  const MAX_LOOKBACK_DAYS = 730;
+  function streakEndingAt(startDay: number): number {
+    let streak = 0;
+    let cursor = startDay;
+    let consecutiveNoLog = 0;
+    let daysWalked = 0;
+    while (daysWalked < MAX_LOOKBACK_DAYS) {
+      if (goodDays.has(cursor)) {
+        streak++;
+        consecutiveNoLog = 0;
+      } else if (anyLogDays.has(cursor)) {
+        break;
+      } else {
+        consecutiveNoLog++;
+        if (consecutiveNoLog >= 5) break;
+      }
+      cursor -= 24 * HOUR;
+      daysWalked++;
+    }
+    return streak;
   }
 
-  const sorted = [...goodDays].sort((a, b) => a - b);
-  let best = 0;
-  let run = 0;
-  let prev: number | null = null;
-  for (const d of sorted) {
-    if (prev !== null && d - prev === 24 * HOUR) run++;
-    else run = 1;
-    if (run > best) best = run;
-    prev = d;
+  const current = streakEndingAt(goodToday ? today : today - 24 * HOUR);
+
+  let best = current;
+  for (const d of goodDays) {
+    const s = streakEndingAt(d);
+    if (s > best) best = s;
   }
 
-  return { current, best: Math.max(best, current), goodToday };
+  return { current, best, goodToday };
 }
 
 export function recentExerciseCount(logs: AnyLog[], now = Date.now()): number {

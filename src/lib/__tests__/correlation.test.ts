@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isFormOptimal, isOptimalStool, gutScore, findPatterns, transitTimeFor } from "../correlation";
+import { isFormOptimal, isOptimalStool, gutScore, findPatterns, transitTimeFor, goodShitStreak } from "../correlation";
 import type { StoolLog, AnyLog, MealLog, WaterLog } from "../types";
 
 function stool(overrides: Partial<StoolLog> = {}): StoolLog {
@@ -238,5 +238,76 @@ describe("findPatterns — frequency-adjusted lift threshold", () => {
     // 1.6) and above the old fixed minimum occurrence count of 5. Only the
     // new minOccurrences=16 rule blocks it.
     expect(ratePattern).toBeUndefined();
+  });
+});
+
+describe("goodShitStreak — log-gap freezing", () => {
+  it("freezes (does not break) the streak across a 3-day unlogged gap", () => {
+    const logs: AnyLog[] = [
+      { id: "s1", type: "stool", timestamp: dayTs(6), bristol: 4, urgency: "low", ease: "easy" },
+      { id: "s2", type: "stool", timestamp: dayTs(5), bristol: 4, urgency: "low", ease: "easy" },
+      // days 4, 3, 2 have NO logs of any kind — a 3-day gap, under the 5-day break threshold
+      { id: "s3", type: "stool", timestamp: dayTs(1), bristol: 4, urgency: "low", ease: "easy" },
+      { id: "s4", type: "stool", timestamp: dayTs(0), bristol: 4, urgency: "low", ease: "easy" },
+    ];
+    const result = goodShitStreak(logs, NOW);
+    // All 4 good days should count toward the streak despite the 3-day gap.
+    expect(result.current).toBe(4);
+  });
+
+  it("breaks the streak after 5 consecutive unlogged days", () => {
+    const logs: AnyLog[] = [
+      { id: "s1", type: "stool", timestamp: dayTs(8), bristol: 4, urgency: "low", ease: "easy" },
+      // days 7,6,5,4,3 have NO logs — a 5-day gap, at the break threshold
+      { id: "s2", type: "stool", timestamp: dayTs(2), bristol: 4, urgency: "low", ease: "easy" },
+      { id: "s3", type: "stool", timestamp: dayTs(1), bristol: 4, urgency: "low", ease: "easy" },
+      { id: "s4", type: "stool", timestamp: dayTs(0), bristol: 4, urgency: "low", ease: "easy" },
+    ];
+    const result = goodShitStreak(logs, NOW);
+    // The streak should only count the 3 most recent good days — the 5-day
+    // gap breaks the connection to the older day-8 entry.
+    expect(result.current).toBe(3);
+  });
+
+  it("breaks (not freezes) on a logged-but-bad day", () => {
+    const logs: AnyLog[] = [
+      { id: "s1", type: "stool", timestamp: dayTs(2), bristol: 4, urgency: "low", ease: "easy" },
+      { id: "s2", type: "stool", timestamp: dayTs(1), bristol: 1, urgency: "high", ease: "strained" }, // logged, bad
+      { id: "s3", type: "stool", timestamp: dayTs(0), bristol: 4, urgency: "low", ease: "easy" },
+    ];
+    const result = goodShitStreak(logs, NOW);
+    // Day 1 was logged but bad — that's a hard break, not a freeze, so the
+    // streak should NOT reach back to day 2.
+    expect(result.current).toBe(1);
+  });
+
+  it("still computes correctly for streaks well within the 2-year lookback cap", () => {
+    const logs: AnyLog[] = [];
+    for (let d = 0; d < 30; d++) {
+      logs.push({ id: `s${d}`, type: "stool", timestamp: dayTs(d), bristol: 4, urgency: "low", ease: "easy" });
+    }
+    const result = goodShitStreak(logs, NOW);
+    expect(result.current).toBe(30);
+    expect(result.best).toBe(30);
+  });
+
+  it("freezes across the maximum 4-day unlogged gap", () => {
+    const logs: AnyLog[] = [
+      { id: "s1", type: "stool", timestamp: dayTs(5), bristol: 4, urgency: "low", ease: "easy" },
+      // days 4, 3, 2, 1 have NO logs — exactly a 4-day gap, still under the break threshold
+      { id: "s2", type: "stool", timestamp: dayTs(0), bristol: 4, urgency: "low", ease: "easy" },
+    ];
+    const result = goodShitStreak(logs, NOW);
+    expect(result.current).toBe(2);
+  });
+
+  it("breaks at exactly 5 consecutive unlogged days, not before", () => {
+    const logs: AnyLog[] = [
+      { id: "s1", type: "stool", timestamp: dayTs(6), bristol: 4, urgency: "low", ease: "easy" },
+      // days 5, 4, 3, 2, 1 have NO logs — exactly 5 days, at the break threshold
+      { id: "s2", type: "stool", timestamp: dayTs(0), bristol: 4, urgency: "low", ease: "easy" },
+    ];
+    const result = goodShitStreak(logs, NOW);
+    expect(result.current).toBe(1);
   });
 });
