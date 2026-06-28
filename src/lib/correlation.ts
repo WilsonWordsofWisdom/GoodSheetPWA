@@ -113,11 +113,31 @@ export function transitTimeFor(stool: StoolLog, logs: AnyLog[]): number | null {
   return Math.round((stool.timestamp - closest.timestamp) / HOUR);
 }
 
+function median(nums: number[]): number {
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+// Personalises the meal-lookback window to the user's own transit time once
+// there's enough data (>=5 points); falls back to the clinical-average 72h
+// otherwise so new users see unchanged behaviour.
+function adaptiveLookbackMs(stools: StoolLog[], logs: AnyLog[]): number {
+  const transitTimes = stools
+    .map((s) => transitTimeFor(s, logs))
+    .filter((t): t is number => t !== null);
+  if (transitTimes.length < 5) return LOOKBACK_MS;
+  const medianHrs = median(transitTimes);
+  const clampedHrs = Math.min(120, Math.max(12, medianHrs * 1.5));
+  return clampedHrs * HOUR;
+}
+
 export function findPatterns(logs: AnyLog[]): PatternInsight[] {
   const stools = logs.filter((l): l is StoolLog => l.type === "stool");
   if (stools.length < 3) return [];
 
   const meals = logs.filter((l): l is MealLog => l.type === "meal");
+  const lookbackMs = adaptiveLookbackMs(stools, logs);
 
   const baselineByCat = {
     loose: stools.filter((s) => categoryOf(s.bristol) === "loose").length / stools.length,
@@ -131,7 +151,7 @@ export function findPatterns(logs: AnyLog[]): PatternInsight[] {
   for (const stool of stools) {
     const cat = categoryOf(stool.bristol);
     const window = meals.filter(
-      (m) => m.timestamp < stool.timestamp && stool.timestamp - m.timestamp <= LOOKBACK_MS
+      (m) => m.timestamp < stool.timestamp && stool.timestamp - m.timestamp <= lookbackMs
     );
     const tags = new Set<string>();
     for (const m of window) for (const t of m.tags) tags.add(t.toLowerCase());
@@ -143,15 +163,19 @@ export function findPatterns(logs: AnyLog[]): PatternInsight[] {
     }
   }
 
+  const minOccurrences = Math.max(5, Math.round(stools.length * 0.08));
+
   const insights: PatternInsight[] = [];
   for (const [tag, data] of tagCounts) {
+    const tagFrequency = data.total / stools.length;
+    const liftThreshold = 1.5 + tagFrequency * 2.0;
     for (const cat of ["loose", "optimal", "constipated"] as const) {
       const occ = data.outcomes[cat];
-      if (occ < 5) continue;
+      if (occ < minOccurrences) continue;
       const conditional = occ / data.total;
       const baseline = baselineByCat[cat] || 0.0001;
       const lift = conditional / baseline;
-      if (lift < 1.5) continue;
+      if (lift < liftThreshold) continue;
 
       const verb =
         cat === "optimal"

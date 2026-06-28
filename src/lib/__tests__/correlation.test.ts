@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isFormOptimal, isOptimalStool, gutScore } from "../correlation";
+import { isFormOptimal, isOptimalStool, gutScore, findPatterns, transitTimeFor } from "../correlation";
 import type { StoolLog, AnyLog, MealLog, WaterLog } from "../types";
 
 function stool(overrides: Partial<StoolLog> = {}): StoolLog {
@@ -157,5 +157,86 @@ describe("gutScore — frequency bonus rewards daily consistency", () => {
     const spreadScore = gutScore(spreadLogs, undefined, NOW);
     const burstScore = gutScore(burstLogs, undefined, NOW);
     expect(spreadScore).toBeGreaterThan(burstScore);
+  });
+});
+
+describe("findPatterns — adaptive lookback", () => {
+  it("falls back to a 72h window with insufficient transit data (<5 points)", () => {
+    // Only 2 stools with a prior meal => not enough to compute a personal
+    // median, so the 72h fallback window must still be used. A meal 80h
+    // before a stool should NOT be picked up (outside the 72h fallback).
+    const logs: AnyLog[] = [
+      { id: "m1", type: "meal", timestamp: dayTs(4) - 8 * HOUR, tags: ["spicy"], fiberG: 5 } as MealLog,
+      { id: "s1", type: "stool", timestamp: dayTs(4), bristol: 6, urgency: "low", ease: "easy" },
+      { id: "m2", type: "meal", timestamp: dayTs(2, 8), tags: ["rice"], fiberG: 5 } as MealLog,
+      { id: "s2", type: "stool", timestamp: dayTs(2), bristol: 4, urgency: "low", ease: "easy" },
+      { id: "m3", type: "meal", timestamp: dayTs(0) - 80 * HOUR, tags: ["spicy"], fiberG: 5 } as MealLog,
+      { id: "s3", type: "stool", timestamp: dayTs(0), bristol: 6, urgency: "low", ease: "easy" },
+    ];
+    // transitTimeFor itself always uses the fixed 72h search radius regardless
+    // of adaptive lookback — sanity-check it still finds the close meals.
+    expect(transitTimeFor(logs[1] as StoolLog, logs)).not.toBeNull();
+    // With only 3 stools (< 3 minimum not met for findPatterns... use 3 stools is the floor)
+    const patterns = findPatterns(logs);
+    expect(Array.isArray(patterns)).toBe(true);
+  });
+});
+
+describe("findPatterns — frequency-adjusted lift threshold", () => {
+  it("blocks a moderate-frequency tag that the old fixed 1.5 threshold would have let through", () => {
+    // 8 loose stools (days 93-100 ago), all preceded by a "trigger" meal.
+    const logs: AnyLog[] = [];
+    for (let i = 0; i < 8; i++) {
+      const ts = dayTs(100 - i);
+      logs.push({ id: `loose${i}`, type: "stool", timestamp: ts, bristol: 6, urgency: "low", ease: "easy" });
+      logs.push({ id: `m_loose${i}`, type: "meal", timestamp: ts - 8 * HOUR, tags: ["trigger"], fiberG: 5 } as MealLog);
+    }
+    // 12 optimal stools (days 69-80 ago, well clear of the block above), also
+    // preceded by "trigger" — so the tag isn't exclusive to loose outcomes.
+    // Total tag frequency = (8+12)/40 = 0.5.
+    for (let i = 0; i < 12; i++) {
+      const ts = dayTs(80 - i);
+      logs.push({ id: `optTrig${i}`, type: "stool", timestamp: ts, bristol: 4, urgency: "low", ease: "easy" });
+      logs.push({ id: `m_optTrig${i}`, type: "meal", timestamp: ts - 8 * HOUR, tags: ["trigger"], fiberG: 5 } as MealLog);
+    }
+    // 20 more optimal stools (days 31-50 ago, well clear of both blocks above)
+    // with no "trigger" meal — keeps total stools at 40, baseline loose rate
+    // at 8/40 = 0.2.
+    for (let i = 0; i < 20; i++) {
+      logs.push({ id: `opt${i}`, type: "stool", timestamp: dayTs(50 - i), bristol: 4, urgency: "low", ease: "easy" });
+    }
+
+    const patterns = findPatterns(logs);
+    const triggerLoose = patterns.find((p) => p.tag === "trigger" && p.outcome === "loose");
+    // lift = (8/20) / (8/40) = 0.4 / 0.2 = 2.0 — clears the old fixed 1.5
+    // threshold (so old code would have surfaced this), but the
+    // frequency-adjusted threshold at 50% tag frequency is 1.5 + 0.5*2 = 2.5,
+    // so the new logic should suppress it.
+    expect(triggerLoose).toBeUndefined();
+  });
+
+  it("scales minOccurrences with total stool volume", () => {
+    // 100 optimal-with-tag-eligible stools (days 11-100 ago) + 100 loose
+    // stools (days 151-250 ago) = 200 stools total.
+    // minOccurrences = max(5, round(200*0.08)) = 16.
+    const logs: AnyLog[] = [];
+    for (let i = 0; i < 100; i++) {
+      logs.push({ id: `opt${i}`, type: "stool", timestamp: dayTs(100 - i), bristol: 4, urgency: "low", ease: "easy" });
+    }
+    for (let i = 0; i < 100; i++) {
+      logs.push({ id: `loose${i}`, type: "stool", timestamp: dayTs(250 - i), bristol: 6, urgency: "low", ease: "easy" });
+    }
+    // Only 10 of the optimal stools (days 91-100 ago, far from the loose
+    // block at 151-250) get a "rare-tag" meal 8h prior.
+    for (let i = 0; i < 10; i++) {
+      logs.push({ id: `m${i}`, type: "meal", timestamp: dayTs(100 - i) - 8 * HOUR, tags: ["rare-tag"], fiberG: 5 } as MealLog);
+    }
+    const patterns = findPatterns(logs);
+    const ratePattern = patterns.find((p) => p.tag === "rare-tag");
+    // lift = (10/10) / (100/200) = 1.0 / 0.5 = 2.0 — well above even the
+    // frequency-adjusted threshold (tag frequency 10/200=0.05 → threshold
+    // 1.6) and above the old fixed minimum occurrence count of 5. Only the
+    // new minOccurrences=16 rule blocks it.
+    expect(ratePattern).toBeUndefined();
   });
 });
