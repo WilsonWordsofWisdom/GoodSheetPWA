@@ -22,13 +22,19 @@ function categoryOf(b: BristolType): "loose" | "optimal" | "constipated" {
   return "optimal";
 }
 
-export function isOptimalStool(s: StoolLog): boolean {
+// Form/comfort dimension only — color is scored independently (see
+// adjustedColorScore in stool-color.ts), so a stool's Bristol form isn't
+// double-penalized when its color is also bad.
+export function isFormOptimal(s: StoolLog): boolean {
   return (
     categoryOf(s.bristol) === "optimal" &&
     s.urgency !== "high" &&
-    s.ease !== "strained" &&
-    isHealthyColor(s.color)
+    s.ease !== "strained"
   );
+}
+
+export function isOptimalStool(s: StoolLog): boolean {
+  return isFormOptimal(s) && isHealthyColor(s.color);
 }
 
 export function gutScore(logs: AnyLog[], profile?: UserProfile, now = Date.now()): number {
