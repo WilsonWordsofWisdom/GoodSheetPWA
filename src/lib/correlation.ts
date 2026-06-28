@@ -1,5 +1,5 @@
 import type { AnyLog, MealLog, StoolLog, ExerciseLog, BristolType, UserProfile } from "./types";
-import { isHealthyColor, getColorScore } from "./stool-color";
+import { isHealthyColor, adjustedColorScore } from "./stool-color";
 import { sevenDayAvgFibre } from "./fibre";
 import { sevenDayAvgHydration, smartHydrationTarget } from "./hydration";
 
@@ -37,32 +37,50 @@ export function isOptimalStool(s: StoolLog): boolean {
   return isFormOptimal(s) && isHealthyColor(s.color);
 }
 
+function dayKey(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function activeDaysInWindow(logs: AnyLog[], since: number, now: number): number {
+  const days = new Set<number>();
+  for (const l of logs) {
+    if (l.timestamp >= since && l.timestamp <= now) days.add(dayKey(l.timestamp));
+  }
+  return days.size;
+}
+
 export function gutScore(logs: AnyLog[], profile?: UserProfile, now = Date.now()): number {
   const since = now - 7 * 24 * HOUR;
   const stools = logs.filter(
-    (l): l is StoolLog => l.type === "stool" && l.timestamp >= since
+    (l): l is StoolLog => l.type === "stool" && l.timestamp >= since && l.timestamp <= now
   );
   if (stools.length === 0) return 0;
 
-  const optimal = stools.filter(isOptimalStool).length;
-  const bristolRatio = optimal / stools.length;
+  const formOptimalStools = stools.filter(isFormOptimal);
+  const bristolRatio = formOptimalStools.length / stools.length;
 
   let colorSum = 0;
-  for (const s of stools) {
-    if (isOptimalStool(s)) colorSum += getColorScore(s.color);
-  }
+  for (const s of stools) colorSum += adjustedColorScore(s, logs);
   const colorRatio = colorSum / stools.length;
 
+  // Scale fibre/hydration targets to the days the user actually logged
+  // anything this week, instead of always dividing by 7 — a 2-day-old user
+  // shouldn't be measured against a 7-day target.
+  const activeDays = activeDaysInWindow(logs, since, now);
+
   const fiberTarget = profile?.fiberTargetG ?? 25;
-  const fibreAvg = sevenDayAvgFibre(logs, now);
-  const fibreScore = Math.min(1, fibreAvg / fiberTarget);
+  const fibreAvgPerActiveDay = (sevenDayAvgFibre(logs, now) * 7) / activeDays;
+  const fibreScore = Math.min(1, fibreAvgPerActiveDay / fiberTarget);
 
   const baseHydration = profile?.hydrationTargetMl ?? 2000;
   const hydrationTarget =
     profile?.smartHydrationEnabled !== false
       ? smartHydrationTarget(logs, baseHydration, now)
       : baseHydration;
-  const hydrationScore = Math.min(1, sevenDayAvgHydration(logs, now) / hydrationTarget);
+  const hydrationAvgPerActiveDay = (sevenDayAvgHydration(logs, now) * 7) / activeDays;
+  const hydrationScore = Math.min(1, hydrationAvgPerActiveDay / hydrationTarget);
 
   // Weights: bristol 50%, colour 20%, fibre 20%, hydration 10%
   // Ref: Müller et al. (2020) Nutrients 12(7):1941; Kieffer et al. (2016) J Acad Nutr Diet
@@ -72,7 +90,12 @@ export function gutScore(logs: AnyLog[], profile?: UserProfile, now = Date.now()
     fibreScore * 0.2 +
     hydrationScore * 0.1;
 
-  const frequencyBonus = (Math.min(optimal, 7) / 7) * 1.3;
+  // Rewards a consistent daily habit, not raw stool volume — 7 optimal stools
+  // in one day no longer scores the same as one optimal stool per day for a week.
+  const optimalDays = new Set<number>();
+  for (const s of formOptimalStools) optimalDays.add(dayKey(s.timestamp));
+  const frequencyBonus = (Math.min(optimalDays.size, 7) / 7) * 1.3;
+
   return Math.min(100, Math.round(blended * 100 * frequencyBonus));
 }
 
