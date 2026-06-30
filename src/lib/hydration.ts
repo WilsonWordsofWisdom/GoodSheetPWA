@@ -25,18 +25,23 @@ export function sevenDayAvgHydration(logs: AnyLog[], now = Date.now()): number {
   return totalMl / 7;
 }
 
-// Auto-raises hydration target when stool data suggests dehydration.
-// Rules (Kieffer et al. 2016; Müller et al. 2020):
-//   +250ml if ≥2 stools are Bristol 1–3 in last 7 days
-//   +250ml if ≥2 stools have strained ease in last 7 days
-//   Maximum auto-raise: +500ml above baseline
+// Auto-raises hydration target using a continuous, severity- and recency-
+// weighted dehydration signal instead of binary thresholds — avoids the old
+// cliff-edge jump between 1 and 2 qualifying stools.
+// Refs: Kieffer et al. (2016); Müller et al. (2020). Max auto-raise: +500ml.
 export function smartHydrationTarget(logs: AnyLog[], baseTarget: number, now = Date.now()): number {
   const since = now - 7 * 24 * HOUR;
   const recentStools = logs.filter(
     (l): l is StoolLog => l.type === "stool" && l.timestamp >= since
   );
-  let bump = 0;
-  if (recentStools.filter((s) => s.bristol <= 3).length >= 2) bump += 250;
-  if (recentStools.filter((s) => s.ease === "strained").length >= 2) bump += 250;
+  let dehydrationSignal = 0;
+  for (const s of recentStools) {
+    const daysSince = (now - s.timestamp) / (24 * HOUR);
+    const ageFactor = 1 - (daysSince / 7) * 0.5;
+    if (s.bristol <= 2) dehydrationSignal += 1.0 * ageFactor;
+    if (s.bristol === 3) dehydrationSignal += 0.4 * ageFactor;
+    if (s.ease === "strained") dehydrationSignal += 0.4 * ageFactor;
+  }
+  const bump = Math.min(500, Math.round(dehydrationSignal * 100));
   return baseTarget + bump;
 }

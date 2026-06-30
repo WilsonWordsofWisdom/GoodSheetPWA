@@ -1,5 +1,5 @@
 import type { AnyLog, MealLog, StoolLog, ExerciseLog, BristolType, UserProfile } from "./types";
-import { isHealthyColor, getColorScore } from "./stool-color";
+import { isHealthyColor, adjustedColorScore } from "./stool-color";
 import { sevenDayAvgFibre } from "./fibre";
 import { sevenDayAvgHydration, smartHydrationTarget } from "./hydration";
 
@@ -22,41 +22,65 @@ function categoryOf(b: BristolType): "loose" | "optimal" | "constipated" {
   return "optimal";
 }
 
-export function isOptimalStool(s: StoolLog): boolean {
+// Form/comfort dimension only — color is scored independently (see
+// adjustedColorScore in stool-color.ts), so a stool's Bristol form isn't
+// double-penalized when its color is also bad.
+export function isFormOptimal(s: StoolLog): boolean {
   return (
     categoryOf(s.bristol) === "optimal" &&
     s.urgency !== "high" &&
-    s.ease !== "strained" &&
-    isHealthyColor(s.color)
+    s.ease !== "strained"
   );
+}
+
+export function isOptimalStool(s: StoolLog): boolean {
+  return isFormOptimal(s) && isHealthyColor(s.color);
+}
+
+function dayKey(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function activeDaysInWindow(logs: AnyLog[], since: number, now: number): number {
+  const days = new Set<number>();
+  for (const l of logs) {
+    if (l.timestamp >= since && l.timestamp <= now) days.add(dayKey(l.timestamp));
+  }
+  return days.size;
 }
 
 export function gutScore(logs: AnyLog[], profile?: UserProfile, now = Date.now()): number {
   const since = now - 7 * 24 * HOUR;
   const stools = logs.filter(
-    (l): l is StoolLog => l.type === "stool" && l.timestamp >= since
+    (l): l is StoolLog => l.type === "stool" && l.timestamp >= since && l.timestamp <= now
   );
   if (stools.length === 0) return 0;
 
-  const optimal = stools.filter(isOptimalStool).length;
-  const bristolRatio = optimal / stools.length;
+  const formOptimalStools = stools.filter(isFormOptimal);
+  const bristolRatio = formOptimalStools.length / stools.length;
 
   let colorSum = 0;
-  for (const s of stools) {
-    if (isOptimalStool(s)) colorSum += getColorScore(s.color);
-  }
+  for (const s of stools) colorSum += adjustedColorScore(s, logs);
   const colorRatio = colorSum / stools.length;
 
+  // Scale fibre/hydration targets to the days the user actually logged
+  // anything this week, instead of always dividing by 7 — a 2-day-old user
+  // shouldn't be measured against a 7-day target.
+  const activeDays = activeDaysInWindow(logs, since, now);
+
   const fiberTarget = profile?.fiberTargetG ?? 25;
-  const fibreAvg = sevenDayAvgFibre(logs, now);
-  const fibreScore = Math.min(1, fibreAvg / fiberTarget);
+  const fibreAvgPerActiveDay = (sevenDayAvgFibre(logs, now) * 7) / activeDays;
+  const fibreScore = Math.min(1, fibreAvgPerActiveDay / fiberTarget);
 
   const baseHydration = profile?.hydrationTargetMl ?? 2000;
   const hydrationTarget =
     profile?.smartHydrationEnabled !== false
       ? smartHydrationTarget(logs, baseHydration, now)
       : baseHydration;
-  const hydrationScore = Math.min(1, sevenDayAvgHydration(logs, now) / hydrationTarget);
+  const hydrationAvgPerActiveDay = (sevenDayAvgHydration(logs, now) * 7) / activeDays;
+  const hydrationScore = Math.min(1, hydrationAvgPerActiveDay / hydrationTarget);
 
   // Weights: bristol 50%, colour 20%, fibre 20%, hydration 10%
   // Ref: Müller et al. (2020) Nutrients 12(7):1941; Kieffer et al. (2016) J Acad Nutr Diet
@@ -66,7 +90,12 @@ export function gutScore(logs: AnyLog[], profile?: UserProfile, now = Date.now()
     fibreScore * 0.2 +
     hydrationScore * 0.1;
 
-  const frequencyBonus = (Math.min(optimal, 7) / 7) * 1.3;
+  // Rewards a consistent daily habit, not raw stool volume — 7 optimal stools
+  // in one day no longer scores the same as one optimal stool per day for a week.
+  const optimalDays = new Set<number>();
+  for (const s of formOptimalStools) optimalDays.add(dayKey(s.timestamp));
+  const frequencyBonus = (Math.min(optimalDays.size, 7) / 7) * 1.3;
+
   return Math.min(100, Math.round(blended * 100 * frequencyBonus));
 }
 
@@ -84,11 +113,31 @@ export function transitTimeFor(stool: StoolLog, logs: AnyLog[]): number | null {
   return Math.round((stool.timestamp - closest.timestamp) / HOUR);
 }
 
+function median(nums: number[]): number {
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+// Personalises the meal-lookback window to the user's own transit time once
+// there's enough data (>=5 points); falls back to the clinical-average 72h
+// otherwise so new users see unchanged behaviour.
+function adaptiveLookbackMs(stools: StoolLog[], logs: AnyLog[]): number {
+  const transitTimes = stools
+    .map((s) => transitTimeFor(s, logs))
+    .filter((t): t is number => t !== null);
+  if (transitTimes.length < 5) return LOOKBACK_MS;
+  const medianHrs = median(transitTimes);
+  const clampedHrs = Math.min(120, Math.max(12, medianHrs * 1.5));
+  return clampedHrs * HOUR;
+}
+
 export function findPatterns(logs: AnyLog[]): PatternInsight[] {
   const stools = logs.filter((l): l is StoolLog => l.type === "stool");
   if (stools.length < 3) return [];
 
   const meals = logs.filter((l): l is MealLog => l.type === "meal");
+  const lookbackMs = adaptiveLookbackMs(stools, logs);
 
   const baselineByCat = {
     loose: stools.filter((s) => categoryOf(s.bristol) === "loose").length / stools.length,
@@ -102,7 +151,7 @@ export function findPatterns(logs: AnyLog[]): PatternInsight[] {
   for (const stool of stools) {
     const cat = categoryOf(stool.bristol);
     const window = meals.filter(
-      (m) => m.timestamp < stool.timestamp && stool.timestamp - m.timestamp <= LOOKBACK_MS
+      (m) => m.timestamp < stool.timestamp && stool.timestamp - m.timestamp <= lookbackMs
     );
     const tags = new Set<string>();
     for (const m of window) for (const t of m.tags) tags.add(t.toLowerCase());
@@ -114,15 +163,19 @@ export function findPatterns(logs: AnyLog[]): PatternInsight[] {
     }
   }
 
+  const minOccurrences = Math.max(5, Math.round(stools.length * 0.08));
+
   const insights: PatternInsight[] = [];
   for (const [tag, data] of tagCounts) {
+    const tagFrequency = data.total / stools.length;
+    const liftThreshold = 1.5 + tagFrequency * 2.0;
     for (const cat of ["loose", "optimal", "constipated"] as const) {
       const occ = data.outcomes[cat];
-      if (occ < 5) continue;
+      if (occ < minOccurrences) continue;
       const conditional = occ / data.total;
       const baseline = baselineByCat[cat] || 0.0001;
       const lift = conditional / baseline;
-      if (lift < 1.5) continue;
+      if (lift < liftThreshold) continue;
 
       const verb =
         cat === "optimal"
@@ -150,40 +203,58 @@ export function goodShitStreak(logs: AnyLog[], now = Date.now()): { current: num
   const stools = logs.filter((l): l is StoolLog => l.type === "stool");
   if (stools.length === 0) return { current: 0, best: 0, goodToday: false };
 
-  const dayKey = (ts: number) => {
-    const d = new Date(ts);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime();
-  };
-
   const goodDays = new Set<number>();
   for (const s of stools) {
     if (categoryOf(s.bristol) === "optimal") goodDays.add(dayKey(s.timestamp));
   }
 
+  const anyLogDays = new Set<number>();
+  for (const l of logs) anyLogDays.add(dayKey(l.timestamp));
+
   const today = dayKey(now);
-  const yesterday = today - 24 * HOUR;
   const goodToday = goodDays.has(today);
 
-  let current = 0;
-  let cursor = goodToday ? today : yesterday;
-  while (goodDays.has(cursor)) {
-    current++;
-    cursor -= 24 * HOUR;
+  // Walks backward from `startDay`: extends on good days, freezes through
+  // unlogged gaps (<5 consecutive days, since a forgotten log shouldn't read
+  // the same as a bad outcome), and breaks on a logged-but-not-good day or a
+  // 5+ day unlogged gap.
+  //
+  // Caps the backward walk at ~2 years so a multi-year power user's "best
+  // streak" computation (called once per good day) stays bounded — beyond
+  // that, the exact historical streak length isn't worth the O(N) cost per
+  // call. A streak this long is already well past what the UI needs to show
+  // precisely.
+  const MAX_LOOKBACK_DAYS = 730;
+  function streakEndingAt(startDay: number): number {
+    let streak = 0;
+    let cursor = startDay;
+    let consecutiveNoLog = 0;
+    let daysWalked = 0;
+    while (daysWalked < MAX_LOOKBACK_DAYS) {
+      if (goodDays.has(cursor)) {
+        streak++;
+        consecutiveNoLog = 0;
+      } else if (anyLogDays.has(cursor)) {
+        break;
+      } else {
+        consecutiveNoLog++;
+        if (consecutiveNoLog >= 5) break;
+      }
+      cursor -= 24 * HOUR;
+      daysWalked++;
+    }
+    return streak;
   }
 
-  const sorted = [...goodDays].sort((a, b) => a - b);
-  let best = 0;
-  let run = 0;
-  let prev: number | null = null;
-  for (const d of sorted) {
-    if (prev !== null && d - prev === 24 * HOUR) run++;
-    else run = 1;
-    if (run > best) best = run;
-    prev = d;
+  const current = streakEndingAt(goodToday ? today : today - 24 * HOUR);
+
+  let best = current;
+  for (const d of goodDays) {
+    const s = streakEndingAt(d);
+    if (s > best) best = s;
   }
 
-  return { current, best: Math.max(best, current), goodToday };
+  return { current, best, goodToday };
 }
 
 export function recentExerciseCount(logs: AnyLog[], now = Date.now()): number {

@@ -34,7 +34,7 @@ export function SaiChat({ logs }: Props) {
       timestamp: Date.now(),
       text: trimmed,
     };
-    const reply = saiReply(trimmed, logs);
+    const reply = saiReply(trimmed, logs, messages);
     setMessages((m) => [...m, userMsg, reply]);
     setInput("");
   };
